@@ -3,7 +3,9 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:open_filex/open_filex.dart';
 import 'package:package_info_plus/package_info_plus.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 enum UpdateAvailability { upToDate, updateAvailable, unavailable }
@@ -159,61 +161,154 @@ class UpdateService {
       return;
     }
 
+    var isDownloading = false;
+    var progress = 0.0;
+    var statusMessage = 'This application needs to be updated before you continue.';
+
     await showDialog<void>(
       context: context,
       barrierDismissible: false,
-      builder: (dialogContext) => PopScope(
-        canPop: false,
-        child: AlertDialog(
-          title: const Text('Update Required'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                'This application needs to be updated before you continue.',
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (dialogContext, setDialogState) {
+          return PopScope(
+            canPop: false,
+            child: AlertDialog(
+              title: const Text('Update Required'),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(statusMessage),
+                  const SizedBox(height: 12),
+                  Text('Current version: ${result.currentVersionLabel}'),
+                  Text('Required version: ${updateInfo.version}'),
+                  if (isDownloading) ...[
+                    const SizedBox(height: 12),
+                    LinearProgressIndicator(value: progress > 0 ? progress : null),
+                    const SizedBox(height: 8),
+                    Text(progress > 0
+                        ? 'Downloading ${(progress * 100).toStringAsFixed(0)}%'
+                        : 'Preparing download...'),
+                  ],
+                  if ((updateInfo.releaseNotes ?? '').trim().isNotEmpty) ...[
+                    const SizedBox(height: 12),
+                    const Text(
+                      'What\'s new',
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      updateInfo.releaseNotes!.trim(),
+                      maxLines: 6,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ],
               ),
-              const SizedBox(height: 12),
-              Text('Current version: ${result.currentVersionLabel}'),
-              Text('Required version: ${updateInfo.version}'),
-              if ((updateInfo.releaseNotes ?? '').trim().isNotEmpty) ...[
-                const SizedBox(height: 12),
-                const Text(
-                  'What\'s new',
-                  style: TextStyle(fontWeight: FontWeight.bold),
+              actions: [
+                TextButton(
+                  onPressed: isDownloading ? null : SystemNavigator.pop,
+                  child: const Text('Close App'),
                 ),
-                const SizedBox(height: 4),
-                Text(
-                  updateInfo.releaseNotes!.trim(),
-                  maxLines: 6,
-                  overflow: TextOverflow.ellipsis,
+                ElevatedButton(
+                  onPressed: isDownloading
+                      ? null
+                      : () async {
+                          setDialogState(() {
+                            isDownloading = true;
+                            progress = 0;
+                            statusMessage = 'Downloading update package...';
+                          });
+
+                          final installed = await downloadAndInstallUpdate(
+                            updateInfo,
+                            onProgress: (value) {
+                              if (!dialogContext.mounted) return;
+                              setDialogState(() => progress = value);
+                            },
+                          );
+
+                          if (!dialogContext.mounted) {
+                            return;
+                          }
+
+                          setDialogState(() {
+                            isDownloading = false;
+                            statusMessage = installed
+                                ? 'Installer opened. Complete the installation, then reopen the app.'
+                                : 'Unable to open the installer automatically. You can try downloading from the browser instead. If Android asks, allow installs from this source.';
+                          });
+
+                          if (!installed) {
+                            final opened = await openUpdate(updateInfo);
+                            if (!dialogContext.mounted) {
+                              return;
+                            }
+                            if (!opened) {
+                              ScaffoldMessenger.of(dialogContext).showSnackBar(
+                                const SnackBar(content: Text('Unable to open update link')),
+                              );
+                            }
+                          }
+                        },
+                  child: Text(isDownloading ? 'Downloading...' : 'Update Now'),
                 ),
               ],
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: SystemNavigator.pop,
-              child: const Text('Close App'),
             ),
-            ElevatedButton(
-              onPressed: () async {
-                final opened = await openUpdate(updateInfo);
-                if (!dialogContext.mounted) {
-                  return;
-                }
-                if (!opened) {
-                  ScaffoldMessenger.of(dialogContext).showSnackBar(
-                    const SnackBar(content: Text('Unable to open update link')),
-                  );
-                }
-              },
-              child: const Text('Update Now'),
-            ),
-          ],
-        ),
+          );
+        },
       ),
     );
+  }
+
+  Future<bool> downloadAndInstallUpdate(
+    UpdateInfo updateInfo, {
+    void Function(double progress)? onProgress,
+  }) async {
+    final client = HttpClient();
+    IOSink? sink;
+
+    try {
+      final tempDir = await getTemporaryDirectory();
+      final safeFileName = _sanitizeFileName(updateInfo.assetName);
+      final apkFile = File('${tempDir.path}/$safeFileName');
+
+      if (await apkFile.exists()) {
+        await apkFile.delete();
+      }
+
+      final request = await client.getUrl(Uri.parse(updateInfo.downloadUrl));
+      request.headers.set(HttpHeaders.userAgentHeader, 'expense-tracker-app');
+      final response = await request.close();
+
+      if (response.statusCode != HttpStatus.ok) {
+        return false;
+      }
+
+      final totalBytes = response.contentLength;
+      var receivedBytes = 0;
+      sink = apkFile.openWrite();
+
+      await for (final chunk in response) {
+        sink.add(chunk);
+        receivedBytes += chunk.length;
+        if (totalBytes > 0) {
+          onProgress?.call(receivedBytes / totalBytes);
+        }
+      }
+
+      await sink.flush();
+      await sink.close();
+      sink = null;
+
+      final openResult = await OpenFilex.open(apkFile.path, type: 'application/vnd.android.package-archive');
+      return openResult.type == ResultType.done;
+    } catch (_) {
+      return false;
+    } finally {
+      await sink?.close();
+      client.close(force: true);
+    }
   }
 
   Future<bool> openUpdate(UpdateInfo updateInfo) async {
@@ -309,5 +404,13 @@ class UpdateService {
     }
 
     return 0;
+  }
+
+  String _sanitizeFileName(String fileName) {
+    final sanitized = fileName.replaceAll(RegExp(r'[^A-Za-z0-9._-]'), '_');
+    if (sanitized.toLowerCase().endsWith('.apk')) {
+      return sanitized;
+    }
+    return '$sanitized.apk';
   }
 }

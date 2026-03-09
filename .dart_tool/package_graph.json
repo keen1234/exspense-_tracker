@@ -12,6 +12,7 @@
         "fl_chart",
         "flutter",
         "intl",
+        "open_filex",
         "package_info_plus",
         "path_provider",
         "provider",
@@ -81,6 +82,14 @@
         "url_launcher_platform_interface",
         "url_launcher_web",
         "url_launcher_windows"
+      ]
+    },
+    {
+      "name": "open_filex",
+      "version": "4.7.0",
+      "dependencies": [
+        "ffi",
+        "flutter"
       ]
     },
     {
@@ -406,6 +415,11 @@
       ]
     },
     {
+      "name": "ffi",
+      "version": "2.2.0",
+      "dependencies": []
+    },
+    {
       "name": "win32",
       "version": "5.15.0",
       "dependencies": [
@@ -442,11 +456,6 @@
       "dependencies": [
         "flutter"
       ]
-    },
-    {
-      "name": "ffi",
-      "version": "2.2.0",
-      "dependencies": []
     },
     {
       "name": "shared_preferences_windows",

@@ -100,8 +100,14 @@ class UpdateService {
 
     final assetName = apkAsset['name'] as String;
     final latestBuildNumber = _extractBuildNumber(assetName);
+    final releaseBuildNumber = _extractBuildNumber(
+      release['tag_name'] as String? ?? release['name'] as String? ?? '',
+    );
+    final effectiveBuildNumber = latestBuildNumber > 0
+        ? latestBuildNumber
+        : releaseBuildNumber;
     final shouldUpdate = _compareVersions(latestVersion, currentVersion) > 0 ||
-        (_compareVersions(latestVersion, currentVersion) == 0 && latestBuildNumber > currentBuildNumber);
+        (_compareVersions(latestVersion, currentVersion) == 0 && effectiveBuildNumber > currentBuildNumber);
 
     if (!shouldUpdate) {
       return UpdateCheckResult(
@@ -116,7 +122,7 @@ class UpdateService {
       currentVersionLabel: currentVersionLabel,
       updateInfo: UpdateInfo(
         version: latestVersion,
-        buildNumber: latestBuildNumber,
+        buildNumber: effectiveBuildNumber,
         downloadUrl: apkAsset['browser_download_url'] as String,
         assetName: assetName,
         releaseNotes: release['body'] as String?,

@@ -602,7 +602,7 @@
       "languageVersion": "3.4"
     },
     {
-      "name": "ExpenseTracker",
+      "name": "expense_tracker",
       "rootUri": "../",
       "packageUri": "lib/",
       "languageVersion": "3.11"

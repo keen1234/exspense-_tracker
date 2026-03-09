@@ -29,7 +29,7 @@ class _CalculatorDialogState extends State<CalculatorDialog> {
         _justEvaluated = false;
       }
 
-      if (_shouldInsertImplicitMultiply()) {
+      if (_shouldInsertImplicitMultiplyBeforeValue()) {
         _expression += _multiply;
       }
 
@@ -45,7 +45,7 @@ class _CalculatorDialogState extends State<CalculatorDialog> {
         _justEvaluated = false;
       }
 
-      if (_shouldInsertImplicitMultiply()) {
+      if (_shouldInsertImplicitMultiplyBeforeValue()) {
         _expression += _multiply;
       }
 
@@ -281,6 +281,10 @@ class _CalculatorDialogState extends State<CalculatorDialog> {
   bool _shouldInsertImplicitMultiply() {
     return _expression.isNotEmpty &&
         (RegExp(r'[0-9)]$').hasMatch(_expression) || _expression.endsWith('.'));
+  }
+
+  bool _shouldInsertImplicitMultiplyBeforeValue() {
+    return _expression.endsWith(')');
   }
 
   String _getCurrentNumberToken() {

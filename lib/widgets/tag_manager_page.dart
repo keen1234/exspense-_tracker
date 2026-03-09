@@ -3,7 +3,7 @@ import '../models/tag.dart';
 import '../repositories/expense_repository.dart';
 
 class TagManagerPage extends StatefulWidget {
-  const TagManagerPage({Key? key}) : super(key: key);
+  const TagManagerPage({super.key});
 
   @override
   State<TagManagerPage> createState() => _TagManagerPageState();
@@ -346,7 +346,7 @@ class _TagManagerPageState extends State<TagManagerPage> {
                 final tag = _tags[index];
                 return ListTile(
                   leading: CircleAvatar(
-                    backgroundColor: tag.type.color.withOpacity(0.1),
+                    backgroundColor: tag.type.color.withValues(alpha: 0.1),
                     child: Icon(
                       tag.type.icon,
                       color: tag.type.color,

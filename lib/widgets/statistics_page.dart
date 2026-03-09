@@ -8,7 +8,7 @@ import '../repositories/expense_repository.dart';
 class StatisticsPage extends StatefulWidget {
   final String currencySymbol;
 
-  const StatisticsPage({Key? key, this.currencySymbol = '₱'}) : super(key: key);
+  const StatisticsPage({super.key, this.currencySymbol = '₱'});
 
   @override
   State<StatisticsPage> createState() => _StatisticsPageState();
@@ -328,7 +328,7 @@ class _StatisticsPageState extends State<StatisticsPage> with SingleTickerProvid
                     dotData: FlDotData(show: sortedDays.length < 15),
                     belowBarData: BarAreaData(
                       show: true,
-                      color: Colors.blue.withOpacity(0.2),
+                      color: Colors.blue.withValues(alpha: 0.2),
                     ),
                   ),
                 ],
@@ -366,7 +366,7 @@ class _StatisticsPageState extends State<StatisticsPage> with SingleTickerProvid
           margin: const EdgeInsets.only(bottom: 8),
           child: ListTile(
             leading: CircleAvatar(
-              backgroundColor: tag.type.color.withOpacity(0.2),
+                backgroundColor: tag.type.color.withValues(alpha: 0.2),
               child: Icon(tag.type.icon, color: tag.type.color),
             ),
             title: Text(tag.name),
@@ -415,7 +415,9 @@ class _StatisticsPageState extends State<StatisticsPage> with SingleTickerProvid
           margin: const EdgeInsets.only(bottom: 8),
           child: ListTile(
             leading: CircleAvatar(
-              backgroundColor: isPositive ? Colors.green.withOpacity(0.2) : Colors.red.withOpacity(0.2),
+                backgroundColor: isPositive
+                    ? Colors.green.withValues(alpha: 0.2)
+                    : Colors.red.withValues(alpha: 0.2),
               child: Icon(
                 isPositive ? Icons.arrow_upward : Icons.arrow_downward,
                 color: isPositive ? Colors.green : Colors.red,

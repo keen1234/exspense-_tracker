@@ -5,9 +5,9 @@ class CalculatorDialog extends StatefulWidget {
   final Function(double result) onUseResult;
 
   const CalculatorDialog({
-    Key? key,
+    super.key,
     required this.onUseResult,
-  }) : super(key: key);
+  });
 
   @override
   State<CalculatorDialog> createState() => _CalculatorDialogState();

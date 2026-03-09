@@ -14,6 +14,7 @@
         "intl",
         "open_filex",
         "package_info_plus",
+        "path",
         "path_provider",
         "provider",
         "share_plus",
@@ -197,6 +198,11 @@
       ]
     },
     {
+      "name": "path",
+      "version": "1.9.1",
+      "dependencies": []
+    },
+    {
       "name": "sqflite",
       "version": "2.4.2",
       "dependencies": [
@@ -228,11 +234,6 @@
         "source_span",
         "string_scanner"
       ]
-    },
-    {
-      "name": "path",
-      "version": "1.9.1",
-      "dependencies": []
     },
     {
       "name": "json_annotation",

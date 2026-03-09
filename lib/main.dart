@@ -20,7 +20,7 @@ void main() async {
 }
 
 class ExpenseApp extends StatelessWidget {
-  const ExpenseApp({Key? key}) : super(key: key);
+  const ExpenseApp({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -51,7 +51,7 @@ class ExpenseApp extends StatelessWidget {
 }
 
 class ExpenseHome extends StatefulWidget {
-  const ExpenseHome({Key? key}) : super(key: key);
+  const ExpenseHome({super.key});
 
   @override
   State<ExpenseHome> createState() => _ExpenseHomeState();
@@ -467,7 +467,7 @@ class _ExpenseHomeState extends State<ExpenseHome> {
     return Container(
       padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.1),
+        color: color.withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(12),
       ),
       child: Row(
@@ -526,7 +526,7 @@ class _ExpenseHomeState extends State<ExpenseHome> {
           ),
           contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
           leading: CircleAvatar(
-            backgroundColor: color.withOpacity(0.1),
+            backgroundColor: color.withValues(alpha: 0.1),
             child: Icon(
               isIncome ? Icons.arrow_upward : Icons.arrow_downward,
               color: color,

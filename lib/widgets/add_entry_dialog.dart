@@ -12,12 +12,12 @@ class AddEntryDialog extends StatefulWidget {
   final Entry? initialEntry;
 
   const AddEntryDialog({
-    Key? key,
+    super.key,
     required this.onSaveEntry,
     required this.tags,
     this.currencySymbol = '₱',
     this.initialEntry,
-  }) : super(key: key);
+  });
 
   @override
   State<AddEntryDialog> createState() => _AddEntryDialogState();
@@ -352,7 +352,7 @@ class _AddEntryDialogState extends State<AddEntryDialog> {
                       Container(
                         padding: const EdgeInsets.all(8),
                         decoration: BoxDecoration(
-                          color: _getSelectedTagColor()?.withOpacity(0.1),
+                          color: _getSelectedTagColor()?.withValues(alpha: 0.1),
                           borderRadius: BorderRadius.circular(6),
                           border: Border.all(
                             color: _getSelectedTagColor() ?? Colors.grey,

@@ -82,10 +82,33 @@ class UpdateService {
         .map((asset) => Map<String, dynamic>.from(asset))
         .toList();
 
-    final apkAsset = assets.cast<Map<String, dynamic>?>().firstWhere(
-      (asset) => (asset?['name'] as String? ?? '').toLowerCase().endsWith('.apk'),
-      orElse: () => null,
-    );
+    final apkAssets = assets
+        .where((asset) =>
+            (asset['name'] as String? ?? '').toLowerCase().endsWith('.apk'))
+        .toList()
+      ..sort((left, right) {
+        final leftBuild = _extractBuildNumberFromAssetName(
+          left['name'] as String? ?? '',
+        );
+        final rightBuild = _extractBuildNumberFromAssetName(
+          right['name'] as String? ?? '',
+        );
+        if (leftBuild != rightBuild) {
+          return rightBuild.compareTo(leftBuild);
+        }
+
+        final leftUpdated = DateTime.tryParse(
+              left['updated_at'] as String? ?? '',
+            ) ??
+            DateTime.fromMillisecondsSinceEpoch(0);
+        final rightUpdated = DateTime.tryParse(
+              right['updated_at'] as String? ?? '',
+            ) ??
+            DateTime.fromMillisecondsSinceEpoch(0);
+        return rightUpdated.compareTo(leftUpdated);
+      });
+
+    final apkAsset = apkAssets.isEmpty ? null : apkAssets.first;
 
     if (apkAsset == null) {
       return UpdateCheckResult(
@@ -96,8 +119,8 @@ class UpdateService {
     }
 
     final assetName = apkAsset['name'] as String;
-    final latestBuildNumber = _extractBuildNumber(assetName);
-    final releaseBuildNumber = _extractBuildNumber(
+    final latestBuildNumber = _extractBuildNumberFromAssetName(assetName);
+    final releaseBuildNumber = _extractBuildNumberFromReleaseText(
       release['tag_name'] as String? ?? release['name'] as String? ?? '',
     );
     final effectiveBuildNumber = latestBuildNumber > 0
@@ -254,11 +277,37 @@ class UpdateService {
     return 0;
   }
 
-  int _extractBuildNumber(String assetName) {
-    final match = RegExp(r'\((\d+)\)\.apk$', caseSensitive: false).firstMatch(assetName);
-    if (match == null) {
-      return 0;
+  int _extractBuildNumberFromAssetName(String assetName) {
+    final patterns = [
+      RegExp(r'\((\d+)\)\.apk$', caseSensitive: false),
+      RegExp(r'[._-](\d+)\.apk$', caseSensitive: false),
+      RegExp(r'\+?(\d+)\.apk$', caseSensitive: false),
+    ];
+
+    for (final pattern in patterns) {
+      final match = pattern.firstMatch(assetName);
+      if (match != null) {
+        return int.tryParse(match.group(1) ?? '') ?? 0;
+      }
     }
-    return int.tryParse(match.group(1) ?? '') ?? 0;
+
+    return 0;
+  }
+
+  int _extractBuildNumberFromReleaseText(String text) {
+    final patterns = [
+      RegExp(r'\+(\d+)$'),
+      RegExp(r'\((\d+)\)$'),
+      RegExp(r'build[\s_-]?(\d+)$', caseSensitive: false),
+    ];
+
+    for (final pattern in patterns) {
+      final match = pattern.firstMatch(text.trim());
+      if (match != null) {
+        return int.tryParse(match.group(1) ?? '') ?? 0;
+      }
+    }
+
+    return 0;
   }
 }

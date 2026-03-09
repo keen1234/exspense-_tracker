@@ -49,7 +49,7 @@ android {
         variant.outputs.all { output ->
             def versionName = variant.versionName
             def versionCode = androidVersionCode
-            outputFileName = "${appName}-v${versionName}(${versionCode}).apk"
+            outputFileName = "${appName}-v${versionName}-build${versionCode}.apk"
         }
     }
 

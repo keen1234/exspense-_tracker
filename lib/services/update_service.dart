@@ -43,7 +43,7 @@ class UpdateCheckResult {
 
 class UpdateService {
   static const String _owner = 'keen1234';
-  static const String _repo = 'Kent';
+  static const String _repo = 'exspense-_tracker';
 
   Future<UpdateCheckResult> checkForUpdate() async {
     if (!Platform.isAndroid) {

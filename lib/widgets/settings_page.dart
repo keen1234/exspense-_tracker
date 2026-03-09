@@ -68,10 +68,7 @@ class _SettingsPageState extends State<SettingsPage> {
     try {
       final info = await PackageInfo.fromPlatform();
       final version = info.version.trim();
-      final buildNumber = info.buildNumber.trim();
-      final label = buildNumber.isEmpty
-          ? 'Version $version'
-          : 'Version $version+$buildNumber';
+      final label = 'Version $version';
 
       if (mounted) {
         setState(() => _appVersionLabel = label);

@@ -57,10 +57,7 @@ class UpdateService {
     final packageInfo = await PackageInfo.fromPlatform();
     final currentVersion = _normalizeVersion(packageInfo.version);
     final currentBuildNumber = int.tryParse(packageInfo.buildNumber) ?? 0;
-    final currentVersionLabel = _buildVersionLabel(
-      currentVersion,
-      currentBuildNumber,
-    );
+    final currentVersionLabel = currentVersion;
 
     final release = await _fetchLatestRelease();
     if (release == null) {
@@ -155,9 +152,7 @@ class UpdateService {
               ),
               const SizedBox(height: 12),
               Text('Current version: ${result.currentVersionLabel}'),
-              Text(
-                'Required version: ${_buildVersionLabel(updateInfo.version, updateInfo.buildNumber)}',
-              ),
+              Text('Required version: ${updateInfo.version}'),
               if ((updateInfo.releaseNotes ?? '').trim().isNotEmpty) ...[
                 const SizedBox(height: 12),
                 const Text(
@@ -265,9 +260,5 @@ class UpdateService {
       return 0;
     }
     return int.tryParse(match.group(1) ?? '') ?? 0;
-  }
-
-  String _buildVersionLabel(String version, int buildNumber) {
-    return buildNumber > 0 ? '$version+$buildNumber' : version;
   }
 }

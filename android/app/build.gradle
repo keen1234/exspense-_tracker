@@ -5,16 +5,7 @@ if (keystorePropertiesFile.exists()) {
     keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
 }
 
-def gitVersionCode = { ->
-    def stdout = new ByteArrayOutputStream()
-    exec {
-        commandLine 'git', 'rev-list', '--count', 'HEAD'
-        standardOutput = stdout
-    }
-    return stdout.toString().trim().toInteger()
-}
-
-def androidVersionCode = gitVersionCode()
+def androidVersionCode = (System.currentTimeMillis() / 1000L) as int
 
 apply plugin: 'com.android.application'
 apply plugin: 'kotlin-android'

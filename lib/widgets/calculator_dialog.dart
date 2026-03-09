@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'dart:math' as math;
 
 class CalculatorDialog extends StatefulWidget {
@@ -15,90 +14,94 @@ class CalculatorDialog extends StatefulWidget {
 }
 
 class _CalculatorDialogState extends State<CalculatorDialog> {
+  static const String _multiply = '×';
+  static const String _divide = '÷';
+
   String _display = '0';
-  String _previousValue = '';
-  String _operation = '';
-  bool _shouldResetDisplay = false;
-  List<String> _history = [];
+  String _expression = '';
+  bool _justEvaluated = false;
+  final List<String> _history = [];
 
   void _onNumberPress(String number) {
     setState(() {
-      if (_display == '0' || _shouldResetDisplay) {
-        _display = number;
-        _shouldResetDisplay = false;
-      } else {
-        if (_display.length < 12) {
-          _display += number;
-        }
+      if (_justEvaluated) {
+        _expression = '';
+        _justEvaluated = false;
       }
+
+      if (_shouldInsertImplicitMultiply()) {
+        _expression += _multiply;
+      }
+
+      _expression += number;
+      _refreshDisplay();
     });
   }
 
   void _onDecimalPress() {
     setState(() {
-      if (_shouldResetDisplay) {
-        _display = '0.';
-        _shouldResetDisplay = false;
-      } else if (!_display.contains('.')) {
-        _display += '.';
+      if (_justEvaluated) {
+        _expression = '';
+        _justEvaluated = false;
       }
+
+      if (_shouldInsertImplicitMultiply()) {
+        _expression += _multiply;
+      }
+
+      final currentNumber = _getCurrentNumberToken();
+      if (currentNumber.contains('.')) {
+        return;
+      }
+
+      if (currentNumber.isEmpty) {
+        _expression += '0.';
+      } else {
+        _expression += '.';
+      }
+      _refreshDisplay();
     });
   }
 
   void _onOperationPress(String operation) {
     setState(() {
-      if (_operation.isNotEmpty && !_shouldResetDisplay) {
-        _calculate();
+      if (_expression.isEmpty) {
+        if (operation == '-') {
+          _expression = '-';
+          _refreshDisplay();
+        }
+        return;
       }
-      _previousValue = _display;
-      _operation = operation;
-      _shouldResetDisplay = true;
+
+      if (_endsWithOperator(_expression)) {
+        _expression = _expression.substring(0, _expression.length - 1) + operation;
+      } else if (_expression.endsWith('(')) {
+        if (operation == '-') {
+          _expression += operation;
+        }
+      } else {
+        _expression += operation;
+      }
+
+      _justEvaluated = false;
+      _refreshDisplay();
     });
   }
 
-  void _calculate() {
-    if (_previousValue.isEmpty || _operation.isEmpty) return;
-
-    double prev = double.tryParse(_previousValue) ?? 0;
-    double current = double.tryParse(_display) ?? 0;
-    double result = 0;
-
-    switch (_operation) {
-      case '+':
-        result = prev + current;
-        break;
-      case '-':
-        result = prev - current;
-        break;
-      case '×':
-        result = prev * current;
-        break;
-      case '÷':
-        if (current != 0) {
-          result = prev / current;
-        } else {
-          _showError('Cannot divide by zero');
-          return;
-        }
-        break;
-      case '%':
-        result = prev % current;
-        break;
-      case '^':
-        result = math.pow(prev, current).toDouble();
-        break;
+  void _refreshDisplay() {
+    if (_expression.isEmpty) {
+      _display = '0';
+      return;
     }
 
-    // Add to history
-    _history.add('$_previousValue $_operation $current = ${result.toStringAsFixed(2)}');
-    if (_history.length > 10) _history.removeAt(0);
+    final currentToken = _getCurrentNumberToken();
+    if (currentToken.isNotEmpty && currentToken != '-') {
+      _display = currentToken;
+      return;
+    }
 
-    setState(() {
-      _display = _formatResult(result);
-      _previousValue = '';
-      _operation = '';
-      _shouldResetDisplay = true;
-    });
+    final preview = _tryEvaluateExpression();
+    _display = preview != null ? _formatResult(preview) : _expression;
   }
 
   String _formatResult(double result) {
@@ -116,68 +119,140 @@ class _CalculatorDialogState extends State<CalculatorDialog> {
   }
 
   void _onEqualsPress() {
-    if (_operation.isNotEmpty) {
-      _calculate();
+    final expression = _expression;
+    final result = _tryEvaluateExpression();
+    if (expression.isEmpty || result == null) {
+      _showError('Invalid expression');
+      return;
     }
+
+    setState(() {
+      _history.add('$expression = ${_formatResult(result)}');
+      if (_history.length > 10) {
+        _history.removeAt(0);
+      }
+      _expression = _formatResult(result);
+      _display = _expression;
+      _justEvaluated = true;
+    });
   }
 
   void _onClear() {
     setState(() {
       _display = '0';
-      _previousValue = '';
-      _operation = '';
-      _shouldResetDisplay = false;
+      _expression = '';
+      _justEvaluated = false;
     });
   }
 
   void _onClearEntry() {
     setState(() {
-      _display = '0';
+      final range = _findLastOperandRange();
+      if (range == null) {
+        _expression = '';
+      } else {
+        _expression = _expression.replaceRange(range.$1, range.$2, '');
+      }
+      _refreshDisplay();
     });
   }
 
   void _onBackspace() {
     setState(() {
-      if (_display.length > 1) {
-        _display = _display.substring(0, _display.length - 1);
-      } else {
+      if (_justEvaluated) {
+        _expression = '';
         _display = '0';
+        _justEvaluated = false;
+        return;
       }
+
+      if (_expression.isNotEmpty) {
+        _expression = _expression.substring(0, _expression.length - 1);
+      }
+      _refreshDisplay();
     });
   }
 
   void _onPercentage() {
     setState(() {
-      double value = double.tryParse(_display) ?? 0;
-      _display = _formatResult(value / 100);
+      final range = _findLastOperandRange();
+      if (range == null) return;
+      final operand = _expression.substring(range.$1, range.$2);
+      _expression = _expression.replaceRange(range.$1, range.$2, '($operand$_divide100Expression)');
+      _refreshDisplay();
     });
   }
 
   void _onSquareRoot() {
     setState(() {
-      double value = double.tryParse(_display) ?? 0;
-      if (value < 0) {
-        _showError('Invalid input');
+      final range = _findLastOperandRange();
+      if (range == null) {
         return;
       }
-      _display = _formatResult(math.sqrt(value));
+      final operand = _expression.substring(range.$1, range.$2);
+      _expression = _expression.replaceRange(range.$1, range.$2, '√($operand)');
+      _refreshDisplay();
     });
   }
 
   void _onSquare() {
     setState(() {
-      double value = double.tryParse(_display) ?? 0;
-      _display = _formatResult(value * value);
+      final range = _findLastOperandRange();
+      if (range == null) {
+        return;
+      }
+      final operand = _expression.substring(range.$1, range.$2);
+      _expression = _expression.replaceRange(range.$1, range.$2, '($operand)^2');
+      _refreshDisplay();
     });
   }
 
   void _onNegate() {
     setState(() {
-      if (_display.startsWith('-')) {
-        _display = _display.substring(1);
-      } else if (_display != '0') {
-        _display = '-$_display';
+      final range = _findLastOperandRange();
+      if (range == null) {
+        if (_expression.isEmpty) {
+          _expression = '-';
+        }
+        _refreshDisplay();
+        return;
       }
+
+      final operand = _expression.substring(range.$1, range.$2);
+      final replacement = _toggleOperandSign(operand);
+      if (replacement == null) {
+        return;
+      }
+
+      _expression = _expression.replaceRange(range.$1, range.$2, replacement);
+      _refreshDisplay();
+    });
+  }
+
+  void _onParenthesisPress(String parenthesis) {
+    setState(() {
+      if (_justEvaluated && parenthesis == '(') {
+        _expression = '';
+        _justEvaluated = false;
+      }
+
+      if (parenthesis == '(') {
+        if (_shouldInsertImplicitMultiply()) {
+          _expression += _multiply;
+        }
+        _expression += '(';
+      } else {
+        final openCount = '('.allMatches(_expression).length;
+        final closeCount = ')'.allMatches(_expression).length;
+        if (openCount > closeCount &&
+            _expression.isNotEmpty &&
+            !_endsWithOperator(_expression) &&
+            !_expression.endsWith('(')) {
+          _expression += ')';
+        }
+      }
+
+      _refreshDisplay();
     });
   }
 
@@ -188,12 +263,311 @@ class _CalculatorDialogState extends State<CalculatorDialog> {
   }
 
   void _useResult() {
-    final result = double.tryParse(_display);
+    final result = _tryEvaluateExpression() ?? double.tryParse(_display);
     if (result != null) {
       widget.onUseResult(result);
       Navigator.of(context).pop();
     }
   }
+
+  bool _endsWithOperator(String value) {
+    return value.endsWith('+') ||
+        value.endsWith('-') ||
+        value.endsWith(_multiply) ||
+        value.endsWith(_divide) ||
+        value.endsWith('^');
+  }
+
+  bool _shouldInsertImplicitMultiply() {
+    return _expression.isNotEmpty &&
+        (RegExp(r'[0-9)]$').hasMatch(_expression) || _expression.endsWith('.'));
+  }
+
+  String _getCurrentNumberToken() {
+    final match = RegExp(r'-?\d*\.?\d+$').firstMatch(_expression);
+    return match?.group(0) ?? '';
+  }
+
+  (int, int)? _findLastOperandRange() {
+    if (_expression.isEmpty) {
+      return null;
+    }
+
+    var end = _expression.length;
+    var index = end - 1;
+    if (index < 0) {
+      return null;
+    }
+
+    if (_expression[index] == ')') {
+      var depth = 0;
+      for (var i = index; i >= 0; i--) {
+        final char = _expression[i];
+        if (char == ')') {
+          depth++;
+        } else if (char == '(') {
+          depth--;
+          if (depth == 0) {
+            var start = i;
+            while (start > 0 && _expression[start - 1] == '√') {
+              start--;
+            }
+            return (start, end);
+          }
+        }
+      }
+      return null;
+    }
+
+    while (index >= 0 && RegExp(r'[0-9.]').hasMatch(_expression[index])) {
+      index--;
+    }
+
+    if (index == end - 1) {
+      return null;
+    }
+
+    final start = index + 1;
+    if (index >= 0 &&
+        _expression[index] == '-' &&
+        (index == 0 || _endsWithOperator(_expression.substring(0, index + 1)) || _expression[index - 1] == '(')) {
+      return (index, end);
+    }
+
+    return (start, end);
+  }
+
+  String? _toggleOperandSign(String operand) {
+    final numericValue = double.tryParse(operand);
+    if (numericValue != null) {
+      if (operand.startsWith('-')) {
+        return operand.substring(1);
+      }
+      return '-$operand';
+    }
+
+    if (operand.startsWith('(0-') && operand.endsWith(')')) {
+      return operand.substring(3, operand.length - 1);
+    }
+
+    return '(0-$operand)';
+  }
+
+  double? _tryEvaluateExpression() {
+    if (_expression.isEmpty) {
+      return 0;
+    }
+
+    try {
+      return _evaluateExpression(_expression);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  double _evaluateExpression(String expression) {
+    final tokens = _tokenize(expression);
+    final output = <String>[];
+    final operators = <String>[];
+
+    for (final token in tokens) {
+      if (double.tryParse(token) != null) {
+        output.add(token);
+        continue;
+      }
+
+      if (token == '√') {
+        operators.add(token);
+        continue;
+      }
+
+      if (token == '(') {
+        operators.add(token);
+        continue;
+      }
+
+      if (token == ')') {
+        while (operators.isNotEmpty && operators.last != '(') {
+          output.add(operators.removeLast());
+        }
+        if (operators.isEmpty) {
+          throw const FormatException('Mismatched parentheses');
+        }
+        operators.removeLast();
+        if (operators.isNotEmpty && operators.last == '√') {
+          output.add(operators.removeLast());
+        }
+        continue;
+      }
+
+      while (operators.isNotEmpty &&
+          operators.last != '(' &&
+          (_precedence(operators.last) > _precedence(token) ||
+              (_precedence(operators.last) == _precedence(token) && !_isRightAssociative(token)))) {
+        output.add(operators.removeLast());
+      }
+      operators.add(token);
+    }
+
+    while (operators.isNotEmpty) {
+      final operator = operators.removeLast();
+      if (operator == '(') {
+        throw const FormatException('Mismatched parentheses');
+      }
+      output.add(operator);
+    }
+
+    final stack = <double>[];
+    for (final token in output) {
+      final numericValue = double.tryParse(token);
+      if (numericValue != null) {
+        stack.add(numericValue);
+        continue;
+      }
+
+      if (token == '√') {
+        if (stack.isEmpty) {
+          throw const FormatException('Invalid expression');
+        }
+        final value = stack.removeLast();
+        if (value < 0) {
+          throw const FormatException('Invalid input');
+        }
+        stack.add(math.sqrt(value));
+        continue;
+      }
+
+      if (stack.length < 2) {
+        throw const FormatException('Invalid expression');
+      }
+
+      final right = stack.removeLast();
+      final left = stack.removeLast();
+      switch (token) {
+        case '+':
+          stack.add(left + right);
+          break;
+        case '-':
+          stack.add(left - right);
+          break;
+        case _multiply:
+          stack.add(left * right);
+          break;
+        case _divide:
+          if (right == 0) {
+            throw const FormatException('Cannot divide by zero');
+          }
+          stack.add(left / right);
+          break;
+        case '%':
+          if (right == 0) {
+            throw const FormatException('Cannot divide by zero');
+          }
+          stack.add(left % right);
+          break;
+        case '^':
+          stack.add(math.pow(left, right).toDouble());
+          break;
+        default:
+          throw const FormatException('Unsupported operator');
+      }
+    }
+
+    if (stack.length != 1) {
+      throw const FormatException('Invalid expression');
+    }
+
+    return stack.single;
+  }
+
+  List<String> _tokenize(String expression) {
+    final tokens = <String>[];
+    var index = 0;
+
+    while (index < expression.length) {
+      final char = expression[index];
+      if (char == ' ') {
+        index++;
+        continue;
+      }
+
+      if (char == '√' || char == '(' || char == ')' || char == '+' || char == _multiply || char == _divide || char == '^' || char == '%') {
+        tokens.add(char);
+        index++;
+        continue;
+      }
+
+      if (char == '-') {
+        final previous = tokens.isEmpty ? null : tokens.last;
+        final isUnary = previous == null ||
+            previous == '(' ||
+            previous == '+' ||
+            previous == '-' ||
+            previous == _multiply ||
+            previous == _divide ||
+            previous == '^' ||
+            previous == '%' ||
+            previous == '√';
+
+        if (isUnary) {
+          final buffer = StringBuffer('-');
+          index++;
+          while (index < expression.length && RegExp(r'[0-9.]').hasMatch(expression[index])) {
+            buffer.write(expression[index]);
+            index++;
+          }
+          if (buffer.length == 1) {
+            tokens.add('0');
+            tokens.add('-');
+          } else {
+            tokens.add(buffer.toString());
+          }
+        } else {
+          tokens.add('-');
+          index++;
+        }
+        continue;
+      }
+
+      if (RegExp(r'[0-9.]').hasMatch(char)) {
+        final buffer = StringBuffer();
+        while (index < expression.length && RegExp(r'[0-9.]').hasMatch(expression[index])) {
+          buffer.write(expression[index]);
+          index++;
+        }
+        tokens.add(buffer.toString());
+        continue;
+      }
+
+      throw FormatException('Invalid character: $char');
+    }
+
+    return tokens;
+  }
+
+  int _precedence(String operator) {
+    switch (operator) {
+      case '√':
+        return 4;
+      case '^':
+        return 3;
+      case _multiply:
+      case _divide:
+      case '%':
+        return 2;
+      case '+':
+      case '-':
+        return 1;
+      default:
+        return 0;
+    }
+  }
+
+  bool _isRightAssociative(String operator) {
+    return operator == '^' || operator == '√';
+  }
+
+  String get _divide100Expression => '${_divide}100';
 
   @override
   Widget build(BuildContext context) {
@@ -216,13 +590,15 @@ class _CalculatorDialogState extends State<CalculatorDialog> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
-                  if (_previousValue.isNotEmpty)
+                  if (_expression.isNotEmpty)
                     Text(
-                      '$_previousValue $_operation',
+                      _expression,
                       style: TextStyle(
                         fontSize: 16,
                         color: Colors.grey.shade600,
                       ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                     ),
                   Text(
                     _display,
@@ -242,10 +618,11 @@ class _CalculatorDialogState extends State<CalculatorDialog> {
             // Scientific functions row
             Row(
               children: [
+                _buildButton('(', () => _onParenthesisPress('('), color: Colors.orange),
+                _buildButton(')', () => _onParenthesisPress(')'), color: Colors.orange),
                 _buildButton('√', _onSquareRoot, color: Colors.orange),
                 _buildButton('x²', _onSquare, color: Colors.orange),
                 _buildButton('%', _onPercentage, color: Colors.orange),
-                _buildButton('CE', _onClearEntry, color: Colors.red.shade300),
               ],
             ),
 
@@ -254,6 +631,7 @@ class _CalculatorDialogState extends State<CalculatorDialog> {
             // Main calculator grid
             Row(
               children: [
+                _buildButton('CE', _onClearEntry, color: Colors.red.shade300),
                 _buildButton('C', _onClear, color: Colors.red),
                 _buildButton('⌫', _onBackspace, color: Colors.orange),
                 _buildButton('^', () => _onOperationPress('^'), color: Colors.orange),

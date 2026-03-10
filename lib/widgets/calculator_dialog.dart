@@ -29,10 +29,6 @@ class _CalculatorDialogState extends State<CalculatorDialog> {
         _justEvaluated = false;
       }
 
-      if (_shouldInsertImplicitMultiplyBeforeValue()) {
-        _expression += _multiply;
-      }
-
       _expression += number;
       _refreshDisplay();
     });
@@ -43,10 +39,6 @@ class _CalculatorDialogState extends State<CalculatorDialog> {
       if (_justEvaluated) {
         _expression = '';
         _justEvaluated = false;
-      }
-
-      if (_shouldInsertImplicitMultiplyBeforeValue()) {
-        _expression += _multiply;
       }
 
       final currentNumber = _getCurrentNumberToken();
@@ -237,9 +229,6 @@ class _CalculatorDialogState extends State<CalculatorDialog> {
       }
 
       if (parenthesis == '(') {
-        if (_shouldInsertImplicitMultiply()) {
-          _expression += _multiply;
-        }
         _expression += '(';
       } else {
         final openCount = '('.allMatches(_expression).length;
@@ -276,15 +265,6 @@ class _CalculatorDialogState extends State<CalculatorDialog> {
         value.endsWith(_multiply) ||
         value.endsWith(_divide) ||
         value.endsWith('^');
-  }
-
-  bool _shouldInsertImplicitMultiply() {
-    return _expression.isNotEmpty &&
-        (RegExp(r'[0-9)]$').hasMatch(_expression) || _expression.endsWith('.'));
-  }
-
-  bool _shouldInsertImplicitMultiplyBeforeValue() {
-    return _expression.endsWith(')');
   }
 
   String _getCurrentNumberToken() {

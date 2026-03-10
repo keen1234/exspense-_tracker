@@ -229,6 +229,9 @@ class _CalculatorDialogState extends State<CalculatorDialog> {
       }
 
       if (parenthesis == '(') {
+        if (_expression.endsWith(')')) {
+          _expression += _multiply;
+        }
         _expression += '(';
       } else {
         final openCount = '('.allMatches(_expression).length;

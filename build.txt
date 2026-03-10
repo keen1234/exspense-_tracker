@@ -1,1 +1,1 @@
-powershell.exe -NoProfile -Command '$env:GRADLE_USER_HOME = Join-Path (Get-Location).Path ".gradle-local-build3"; flutter clean; flutter pub get; flutter build apk --release'
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\build_release.ps1"

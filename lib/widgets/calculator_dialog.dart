@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'dart:math' as math;
 
 class CalculatorDialog extends StatefulWidget {
@@ -13,14 +14,43 @@ class CalculatorDialog extends StatefulWidget {
   State<CalculatorDialog> createState() => _CalculatorDialogState();
 }
 
-class _CalculatorDialogState extends State<CalculatorDialog> {
+class _CalculatorDialogState extends State<CalculatorDialog>
+    with SingleTickerProviderStateMixin {
   static const String _multiply = '×';
   static const String _divide = '÷';
+  static const List<int> _cashDenominations = [1, 5, 10, 20, 50, 100, 500, 1000];
 
   String _display = '0';
   String _expression = '';
   bool _justEvaluated = false;
   final List<String> _history = [];
+  late final TabController _tabController;
+  late final Map<int, TextEditingController> _denominationControllers;
+  int _activeTabIndex = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _tabController = TabController(length: 2, vsync: this)
+      ..addListener(() {
+        if (_activeTabIndex != _tabController.index) {
+          setState(() => _activeTabIndex = _tabController.index);
+        }
+      });
+    _denominationControllers = {
+      for (final denomination in _cashDenominations)
+        denomination: TextEditingController(),
+    };
+  }
+
+  @override
+  void dispose() {
+    _tabController.dispose();
+    for (final controller in _denominationControllers.values) {
+      controller.dispose();
+    }
+    super.dispose();
+  }
 
   void _onNumberPress(String number) {
     setState(() {
@@ -255,11 +285,28 @@ class _CalculatorDialogState extends State<CalculatorDialog> {
   }
 
   void _useResult() {
-    final result = _tryEvaluateExpression() ?? double.tryParse(_display);
+    final result = _activeTabIndex == 1
+        ? _getCashTotal().toDouble()
+        : _tryEvaluateExpression() ?? double.tryParse(_display);
     if (result != null) {
       widget.onUseResult(result);
       Navigator.of(context).pop();
     }
+  }
+
+  int _getDenominationCount(int denomination) {
+    return int.tryParse(_denominationControllers[denomination]!.text) ?? 0;
+  }
+
+  int _getDenominationTotal(int denomination) {
+    return denomination * _getDenominationCount(denomination);
+  }
+
+  int _getCashTotal() {
+    return _cashDenominations.fold<int>(
+      0,
+      (sum, denomination) => sum + _getDenominationTotal(denomination),
+    );
   }
 
   bool _endsWithOperator(String value) {
@@ -558,143 +605,40 @@ class _CalculatorDialogState extends State<CalculatorDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final dialogHeight = math.min(
+      MediaQuery.of(context).size.height * 0.88,
+      760.0,
+    );
+
     return Dialog(
       child: Container(
-        width: 350,
+        width: 380,
+        height: dialogHeight,
         padding: const EdgeInsets.all(16),
         child: Column(
-          mainAxisSize: MainAxisSize.min,
           children: [
-            // Display
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: Colors.grey.shade100,
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.grey.shade300),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.end,
+            TabBar(
+              controller: _tabController,
+              tabs: const [
+                Tab(text: 'Calculator', icon: Icon(Icons.calculate_outlined)),
+                Tab(text: 'Cash List', icon: Icon(Icons.payments_outlined)),
+              ],
+            ),
+
+            const SizedBox(height: 16),
+
+            Expanded(
+              child: TabBarView(
+                controller: _tabController,
                 children: [
-                  if (_expression.isNotEmpty)
-                    Text(
-                      _expression,
-                      style: TextStyle(
-                        fontSize: 16,
-                        color: Colors.grey.shade600,
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  Text(
-                    _display,
-                    style: const TextStyle(
-                      fontSize: 32,
-                      fontWeight: FontWeight.bold,
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
+                  _buildCalculatorTab(),
+                  _buildCashListTab(),
                 ],
               ),
             ),
 
             const SizedBox(height: 16),
 
-            // Scientific functions row
-            Row(
-              children: [
-                _buildButton('(', () => _onParenthesisPress('('), color: Colors.orange),
-                _buildButton(')', () => _onParenthesisPress(')'), color: Colors.orange),
-                _buildButton('√', _onSquareRoot, color: Colors.orange),
-                _buildButton('x²', _onSquare, color: Colors.orange),
-                _buildButton('%', _onPercentage, color: Colors.orange),
-              ],
-            ),
-
-            const SizedBox(height: 8),
-
-            // Main calculator grid
-            Row(
-              children: [
-                _buildButton('CE', _onClearEntry, color: Colors.red.shade300),
-                _buildButton('C', _onClear, color: Colors.red),
-                _buildButton('⌫', _onBackspace, color: Colors.orange),
-                _buildButton('^', () => _onOperationPress('^'), color: Colors.orange),
-                _buildButton('÷', () => _onOperationPress('÷'), color: Colors.orange),
-              ],
-            ),
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                _buildButton('7', () => _onNumberPress('7')),
-                _buildButton('8', () => _onNumberPress('8')),
-                _buildButton('9', () => _onNumberPress('9')),
-                _buildButton('×', () => _onOperationPress('×'), color: Colors.orange),
-              ],
-            ),
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                _buildButton('4', () => _onNumberPress('4')),
-                _buildButton('5', () => _onNumberPress('5')),
-                _buildButton('6', () => _onNumberPress('6')),
-                _buildButton('-', () => _onOperationPress('-'), color: Colors.orange),
-              ],
-            ),
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                _buildButton('1', () => _onNumberPress('1')),
-                _buildButton('2', () => _onNumberPress('2')),
-                _buildButton('3', () => _onNumberPress('3')),
-                _buildButton('+', () => _onOperationPress('+'), color: Colors.orange),
-              ],
-            ),
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                _buildButton('±', _onNegate, color: Colors.grey),
-                _buildButton('0', () => _onNumberPress('0')),
-                _buildButton('.', _onDecimalPress),
-                _buildButton('=', _onEqualsPress, color: Colors.green),
-              ],
-            ),
-
-            const SizedBox(height: 16),
-
-            // History
-            if (_history.isNotEmpty) ...[
-              const Text('History', style: TextStyle(fontWeight: FontWeight.bold)),
-              const SizedBox(height: 8),
-              Container(
-                height: 80,
-                decoration: BoxDecoration(
-                  color: Colors.grey.shade50,
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: ListView.builder(
-                  itemCount: _history.length,
-                  reverse: true,
-                  itemBuilder: (context, index) {
-                    return Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                      child: Text(
-                        _history[_history.length - 1 - index],
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: Colors.grey.shade700,
-                        ),
-                      ),
-                    );
-                  },
-                ),
-              ),
-              const SizedBox(height: 16),
-            ],
-
-            // Action buttons
             Row(
               children: [
                 Expanded(
@@ -743,6 +687,251 @@ class _CalculatorDialogState extends State<CalculatorDialog> {
             text,
             style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
           ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCalculatorTab() {
+    return ListView(
+      children: [
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: Colors.grey.shade100,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: Colors.grey.shade300),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              if (_expression.isNotEmpty)
+                Text(
+                  _expression,
+                  style: TextStyle(
+                    fontSize: 16,
+                    color: Colors.grey.shade600,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              Text(
+                _display,
+                style: const TextStyle(
+                  fontSize: 32,
+                  fontWeight: FontWeight.bold,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
+        Row(
+          children: [
+            _buildButton('(', () => _onParenthesisPress('('), color: Colors.orange),
+            _buildButton(')', () => _onParenthesisPress(')'), color: Colors.orange),
+            _buildButton('√', _onSquareRoot, color: Colors.orange),
+            _buildButton('x²', _onSquare, color: Colors.orange),
+            _buildButton('%', _onPercentage, color: Colors.orange),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            _buildButton('CE', _onClearEntry, color: Colors.red.shade300),
+            _buildButton('C', _onClear, color: Colors.red),
+            _buildButton('⌫', _onBackspace, color: Colors.orange),
+            _buildButton('^', () => _onOperationPress('^'), color: Colors.orange),
+            _buildButton('÷', () => _onOperationPress('÷'), color: Colors.orange),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            _buildButton('7', () => _onNumberPress('7')),
+            _buildButton('8', () => _onNumberPress('8')),
+            _buildButton('9', () => _onNumberPress('9')),
+            _buildButton('×', () => _onOperationPress('×'), color: Colors.orange),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            _buildButton('4', () => _onNumberPress('4')),
+            _buildButton('5', () => _onNumberPress('5')),
+            _buildButton('6', () => _onNumberPress('6')),
+            _buildButton('-', () => _onOperationPress('-'), color: Colors.orange),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            _buildButton('1', () => _onNumberPress('1')),
+            _buildButton('2', () => _onNumberPress('2')),
+            _buildButton('3', () => _onNumberPress('3')),
+            _buildButton('+', () => _onOperationPress('+'), color: Colors.orange),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            _buildButton('±', _onNegate, color: Colors.grey),
+            _buildButton('0', () => _onNumberPress('0')),
+            _buildButton('.', _onDecimalPress),
+            _buildButton('=', _onEqualsPress, color: Colors.green),
+          ],
+        ),
+        if (_history.isNotEmpty) ...[
+          const SizedBox(height: 16),
+          const Text('History', style: TextStyle(fontWeight: FontWeight.bold)),
+          const SizedBox(height: 8),
+          Container(
+            height: 80,
+            decoration: BoxDecoration(
+              color: Colors.grey.shade50,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: ListView.builder(
+              itemCount: _history.length,
+              reverse: true,
+              itemBuilder: (context, index) {
+                return Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                  child: Text(
+                    _history[_history.length - 1 - index],
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.grey.shade700,
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildCashListTab() {
+    final cashTotal = _getCashTotal();
+
+    return ListView(
+      children: [
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: Colors.green.shade50,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: Colors.green.shade200),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Cash Total',
+                style: TextStyle(
+                  color: Colors.green.shade900,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                _formatResult(cashTotal.toDouble()),
+                style: TextStyle(
+                  fontSize: 30,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.green.shade900,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                'Enter how many pieces you have for each bill or coin.',
+                style: TextStyle(color: Colors.green.shade800),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
+        ..._cashDenominations.map(_buildDenominationRow),
+        const SizedBox(height: 12),
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.08),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Row(
+            children: [
+              const Expanded(
+                child: Text(
+                  'Grand Total',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                ),
+              ),
+              Text(
+                _formatResult(cashTotal.toDouble()),
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                  color: Theme.of(context).colorScheme.primary,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildDenominationRow(int denomination) {
+    final total = _getDenominationTotal(denomination);
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: 10),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    denomination.toString(),
+                    style: const TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    '$denomination x ${_getDenominationCount(denomination)} = $total',
+                    style: TextStyle(color: Colors.grey.shade700),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 12),
+            SizedBox(
+              width: 90,
+              child: TextField(
+                controller: _denominationControllers[denomination],
+                keyboardType: TextInputType.number,
+                textAlign: TextAlign.center,
+                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                decoration: const InputDecoration(
+                  labelText: 'Qty',
+                  border: OutlineInputBorder(),
+                  isDense: true,
+                ),
+                onChanged: (_) => setState(() {}),
+              ),
+            ),
+          ],
         ),
       ),
     );

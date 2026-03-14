@@ -11,11 +11,15 @@ class Tag {
   final int? id;
   final String name;
   final TagType type;
+  final int? groupId;
+  final String? groupName;
 
   Tag({
     this.id,
     required this.name,
     required this.type,
+    this.groupId,
+    this.groupName,
   });
 
   factory Tag.fromMap(Map<String, dynamic> map) {
@@ -23,6 +27,8 @@ class Tag {
       id: map['id'] as int?,
       name: map['name'] as String,
       type: TagType.values.byName(map['type'] as String),
+      groupId: map['group_id'] as int?,
+      groupName: map['group_name'] as String?,
     );
   }
 
@@ -31,7 +37,25 @@ class Tag {
       'id': id,
       'name': name,
       'type': type.name,
+      'group_id': groupId,
     };
+  }
+
+  bool get hasGroup => (groupName?.trim().isNotEmpty ?? false);
+
+  String? get normalizedGroupName {
+    final value = groupName?.trim();
+    if (value == null || value.isEmpty) {
+      return null;
+    }
+    return value;
+  }
+
+  String get displayName {
+    if (!hasGroup) {
+      return name;
+    }
+    return '$groupName / $name';
   }
 
   @override

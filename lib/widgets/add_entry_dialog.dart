@@ -267,77 +267,23 @@ class _AddEntryDialogState extends State<AddEntryDialog> {
                           icon: const Icon(Icons.arrow_drop_down),
                           padding: const EdgeInsets.symmetric(horizontal: 12),
                           borderRadius: BorderRadius.circular(8),
-                          items: [
-                            if (incomeTags.isNotEmpty)
-                              const DropdownMenuItem<int>(
-                                enabled: false,
-                                child: Text(
-                                  'INCOME',
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.bold,
-                                    color: Colors.green,
-                                  ),
-                                ),
-                              ),
-                            ...incomeTags.map((tag) => DropdownMenuItem<int>(
-                              value: tag.id,
-                              child: Row(
-                                children: [
-                                  Icon(
-                                    tag.type.icon,
-                                    color: tag.type.color,
-                                    size: 20,
-                                  ),
-                                  const SizedBox(width: 8),
-                                  Expanded(
-                                    child: Text(
-                                      tag.name,
-                                      style: TextStyle(color: tag.type.color),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            )),
-
-                            if (incomeTags.isNotEmpty && expenseTags.isNotEmpty)
-                              const DropdownMenuItem<int>(
-                                enabled: false,
-                                child: Divider(),
-                              ),
-
-                            if (expenseTags.isNotEmpty)
-                              const DropdownMenuItem<int>(
-                                enabled: false,
-                                child: Text(
-                                  'EXPENSE',
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.bold,
-                                    color: Colors.red,
-                                  ),
-                                ),
-                              ),
-                            ...expenseTags.map((tag) => DropdownMenuItem<int>(
-                              value: tag.id,
-                              child: Row(
-                                children: [
-                                  Icon(
-                                    tag.type.icon,
-                                    color: tag.type.color,
-                                    size: 20,
-                                  ),
-                                  const SizedBox(width: 8),
-                                  Expanded(
-                                    child: Text(
-                                      tag.name,
-                                      style: TextStyle(color: tag.type.color),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            )),
-                          ],
+                           items: [
+                             ..._buildTagItems(
+                               title: 'INCOME',
+                               titleColor: Colors.green,
+                               tags: incomeTags,
+                             ),
+                             if (incomeTags.isNotEmpty && expenseTags.isNotEmpty)
+                               const DropdownMenuItem<int>(
+                                 enabled: false,
+                                 child: Divider(),
+                               ),
+                             ..._buildTagItems(
+                               title: 'EXPENSE',
+                               titleColor: Colors.red,
+                               tags: expenseTags,
+                             ),
+                           ],
                           onChanged: (value) {
                             setState(() {
                               _selectedTagId = value;
@@ -426,5 +372,81 @@ class _AddEntryDialogState extends State<AddEntryDialog> {
   IconData? _getSelectedTagIcon() {
     final tag = _getSelectedTag();
     return tag?.type.icon;
+  }
+
+  List<DropdownMenuItem<int>> _buildTagItems({
+    required String title,
+    required Color titleColor,
+    required List<Tag> tags,
+  }) {
+    if (tags.isEmpty) {
+      return const [];
+    }
+
+    final items = <DropdownMenuItem<int>>[
+      DropdownMenuItem<int>(
+        enabled: false,
+        child: Text(
+          title,
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.bold,
+            color: titleColor,
+          ),
+        ),
+      ),
+    ];
+
+    String? currentGroup;
+    for (final tag in tags) {
+      final normalizedGroup = tag.groupName?.trim();
+      if (normalizedGroup != currentGroup) {
+        currentGroup = normalizedGroup;
+        if (currentGroup != null && currentGroup.isNotEmpty) {
+          items.add(
+            DropdownMenuItem<int>(
+              enabled: false,
+              child: Padding(
+                padding: const EdgeInsets.only(left: 8),
+                child: Text(
+                  currentGroup,
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.grey.shade700,
+                  ),
+                ),
+              ),
+            ),
+          );
+        }
+      }
+
+      items.add(
+        DropdownMenuItem<int>(
+          value: tag.id,
+          child: Row(
+            children: [
+              Icon(
+                tag.type.icon,
+                color: tag.type.color,
+                size: 20,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  currentGroup != null && currentGroup.isNotEmpty
+                      ? '${tag.groupName} / ${tag.name}'
+                      : tag.name,
+                  style: TextStyle(color: tag.type.color),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return items;
   }
 }

@@ -43,6 +43,16 @@ class UpdateCheckResult {
       availability == UpdateAvailability.updateAvailable && updateInfo != null;
 }
 
+class UpdateInstallResult {
+  final bool installerOpened;
+  final String? message;
+
+  const UpdateInstallResult({
+    required this.installerOpened,
+    this.message,
+  });
+}
+
 class UpdateService {
   static const String _owner = 'keen1234';
   static const String _repo = 'exspense_tracker';
@@ -220,7 +230,7 @@ class UpdateService {
                             statusMessage = 'Downloading update package...';
                           });
 
-                          final installed = await downloadAndInstallUpdate(
+                          final installResult = await downloadAndInstallUpdate(
                             updateInfo,
                             onProgress: (value) {
                               if (!dialogContext.mounted) return;
@@ -234,12 +244,13 @@ class UpdateService {
 
                           setDialogState(() {
                             isDownloading = false;
-                            statusMessage = installed
+                            statusMessage = installResult.installerOpened
                                 ? 'Installer opened. Complete the installation, then reopen the app.'
-                                : 'Unable to open the installer automatically. You can try downloading from the browser instead. If Android asks, allow installs from this source.';
+                                : installResult.message ??
+                                    'Unable to open the installer automatically. You can try downloading from the browser instead. If Android asks, allow installs from this source.';
                           });
 
-                          if (!installed) {
+                          if (!installResult.installerOpened) {
                             final opened = await openUpdate(updateInfo);
                             if (!dialogContext.mounted) {
                               return;
@@ -261,7 +272,7 @@ class UpdateService {
     );
   }
 
-  Future<bool> downloadAndInstallUpdate(
+  Future<UpdateInstallResult> downloadAndInstallUpdate(
     UpdateInfo updateInfo, {
     void Function(double progress)? onProgress,
   }) async {
@@ -269,9 +280,14 @@ class UpdateService {
     IOSink? sink;
 
     try {
-      final tempDir = await getTemporaryDirectory();
+      final appDir = await getApplicationDocumentsDirectory();
+      final updateDir = Directory('${appDir.path}/updates');
+      if (!await updateDir.exists()) {
+        await updateDir.create(recursive: true);
+      }
+
       final safeFileName = _sanitizeFileName(updateInfo.assetName);
-      final apkFile = File('${tempDir.path}/$safeFileName');
+      final apkFile = File('${updateDir.path}/$safeFileName');
 
       if (await apkFile.exists()) {
         await apkFile.delete();
@@ -282,7 +298,10 @@ class UpdateService {
       final response = await request.close();
 
       if (response.statusCode != HttpStatus.ok) {
-        return false;
+        return UpdateInstallResult(
+          installerOpened: false,
+          message: 'Download failed with status ${response.statusCode}.',
+        );
       }
 
       final totalBytes = response.contentLength;
@@ -301,10 +320,32 @@ class UpdateService {
       await sink.close();
       sink = null;
 
+      if (receivedBytes <= 0 || !await apkFile.exists()) {
+        return const UpdateInstallResult(
+          installerOpened: false,
+          message: 'The update package could not be saved on this device.',
+        );
+      }
+
+      onProgress?.call(1);
+
       final openResult = await OpenFilex.open(apkFile.path, type: 'application/vnd.android.package-archive');
-      return openResult.type == ResultType.done;
-    } catch (_) {
-      return false;
+      if (openResult.type == ResultType.done) {
+        return const UpdateInstallResult(installerOpened: true);
+      }
+
+      final detail = openResult.message.trim();
+      return UpdateInstallResult(
+        installerOpened: false,
+        message: detail.isNotEmpty
+            ? 'Download finished, but Android could not open the installer: $detail'
+            : 'Download finished, but Android could not open the installer. Allow installs from this source if prompted.',
+      );
+    } catch (e) {
+      return UpdateInstallResult(
+        installerOpened: false,
+        message: 'Update download failed: $e',
+      );
     } finally {
       await sink?.close();
       client.close(force: true);

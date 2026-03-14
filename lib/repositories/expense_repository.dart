@@ -1,16 +1,46 @@
 import '../database/db_helper.dart';
 import '../models/entry.dart';
 import '../models/tag.dart';
+import '../models/tag_group.dart';
 
 class ExpenseRepository {
   static Future<List<Tag>> getAllTags() async {
-    final maps = await DBHelper.getAll('tags', orderBy: 'name ASC');
+    final maps = await DBHelper.rawQuery('''
+      SELECT
+        t.id,
+        t.name,
+        t.type,
+        t.group_id,
+        g.name AS group_name
+      FROM tags t
+      LEFT JOIN tag_groups g ON g.id = t.group_id
+      ORDER BY
+        CASE WHEN g.name IS NULL THEN 1 ELSE 0 END,
+        LOWER(COALESCE(g.name, '')),
+        CASE WHEN t.type = 'income' THEN 0 ELSE 1 END,
+        LOWER(t.name)
+    ''');
     return maps.map((m) => Tag.fromMap(m)).toList();
+  }
+
+  static Future<List<TagGroup>> getAllTagGroups() async {
+    final maps = await DBHelper.getAll('tag_groups', orderBy: 'name COLLATE NOCASE ASC');
+    return maps.map((m) => TagGroup.fromMap(m)).toList();
   }
 
   static Future<Tag?> getTagById(int id) async {
     final results = await DBHelper.rawQuery(
-      'SELECT * FROM tags WHERE id = ?',
+      '''
+      SELECT
+        t.id,
+        t.name,
+        t.type,
+        t.group_id,
+        g.name AS group_name
+      FROM tags t
+      LEFT JOIN tag_groups g ON g.id = t.group_id
+      WHERE t.id = ?
+      ''',
       [id],
     );
     if (results.isEmpty) return null;
@@ -19,6 +49,10 @@ class ExpenseRepository {
 
   static Future<int> insertTag(Tag tag) async {
     return await DBHelper.insert('tags', tag.toMap());
+  }
+
+  static Future<int> insertTagGroup(TagGroup group) async {
+    return await DBHelper.insert('tag_groups', group.toMap());
   }
 
   static Future<int> updateTag(Tag tag) async {
@@ -34,8 +68,46 @@ class ExpenseRepository {
     );
   }
 
+  static Future<int> updateTagGroup(TagGroup group) async {
+    if (group.id == null) {
+      throw ArgumentError('Group id is required for update');
+    }
+
+    return await DBHelper.update(
+      'tag_groups',
+      group.toMap(),
+      'id = ?',
+      [group.id],
+    );
+  }
+
   static Future<int> deleteTag(int id) async {
     return await DBHelper.delete('tags', 'id = ?', [id]);
+  }
+
+  static Future<int> deleteTagGroup(int id) async {
+    return await DBHelper.delete('tag_groups', 'id = ?', [id]);
+  }
+
+  static Future<void> replaceGroupMembership(int groupId, List<int> tagIds) async {
+    final db = await DBHelper.database;
+    await db.transaction((txn) async {
+      await txn.update(
+        'tags',
+        {'group_id': null},
+        where: 'group_id = ?',
+        whereArgs: [groupId],
+      );
+
+      for (final tagId in tagIds) {
+        await txn.update(
+          'tags',
+          {'group_id': groupId},
+          where: 'id = ?',
+          whereArgs: [tagId],
+        );
+      }
+    });
   }
 
   static Future<List<Entry>> getAllEntries({String? orderBy}) async {
@@ -91,9 +163,10 @@ class ExpenseRepository {
 
   static Future<Map<Tag, double>> getTotalsByTag() async {
     final results = await DBHelper.rawQuery('''
-      SELECT t.id, t.name, t.type, SUM(e.amount) as total
+      SELECT t.id, t.name, t.type, t.group_id, g.name AS group_name, SUM(e.amount) as total
       FROM entries e
       JOIN tags t ON e.tag_id = t.id
+      LEFT JOIN tag_groups g ON g.id = t.group_id
       GROUP BY t.id
       ORDER BY total DESC
     ''');

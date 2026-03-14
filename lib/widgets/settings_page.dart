@@ -6,6 +6,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 import 'dart:io';
 import '../database/db_helper.dart';
+import '../models/account_session.dart';
 import '../repositories/expense_repository.dart';
 import '../services/settings_service.dart';
 import '../services/update_service.dart';
@@ -19,6 +20,8 @@ class SettingsPage extends StatefulWidget {
 
 class _SettingsPageState extends State<SettingsPage> {
   String _selectedCurrencyCode = 'PHP'; // Store code instead of symbol
+  List<AccountSession> _accounts = const [];
+  String _activeAccountId = '';
   bool _isLoading = false;
   String _appVersionLabel = 'Version -';
 
@@ -60,8 +63,172 @@ class _SettingsPageState extends State<SettingsPage> {
   void _loadSettings() {
     final settings = SettingsService();
     setState(() {
+      _accounts = settings.getAccounts();
+      _activeAccountId = settings.getCurrentAccount().id;
       _selectedCurrencyCode = settings.getCurrency();
     });
+  }
+
+  Future<void> _addAccount() async {
+    final controller = TextEditingController();
+    final accountName = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Add Account'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          textCapitalization: TextCapitalization.words,
+          decoration: const InputDecoration(
+            labelText: 'Account name',
+            hintText: 'Personal, Work, Business',
+          ),
+          onSubmitted: (value) => Navigator.of(context).pop(value),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(context).pop(controller.text),
+            child: const Text('Create'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+
+    final trimmedName = accountName?.trim();
+    if (trimmedName == null || trimmedName.isEmpty) {
+      return;
+    }
+
+    setState(() => _isLoading = true);
+
+    try {
+      final settings = SettingsService();
+      final account = await settings.addAccount(
+        trimmedName,
+        initialCurrencyCode: _selectedCurrencyCode,
+      );
+      await DBHelper.close();
+
+      if (!mounted) {
+        return;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Switched to ${account.name}')),
+      );
+      Navigator.of(context).pop(true);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Unable to add account: $e')),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+    }
+  }
+
+  Future<void> _renameAccount(AccountSession account) async {
+    final controller = TextEditingController(text: account.name);
+    final accountName = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Edit Account Name'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          textCapitalization: TextCapitalization.words,
+          decoration: const InputDecoration(
+            labelText: 'Account name',
+          ),
+          onSubmitted: (value) => Navigator.of(context).pop(value),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(context).pop(controller.text),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+
+    final trimmedName = accountName?.trim();
+    if (trimmedName == null || trimmedName.isEmpty || trimmedName == account.name) {
+      return;
+    }
+
+    setState(() => _isLoading = true);
+
+    try {
+      final updated = await SettingsService().renameAccount(account.id, trimmedName);
+      if (!mounted) {
+        return;
+      }
+
+      _loadSettings();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Renamed account to ${updated.name}')),
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Unable to rename account: $e')),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+    }
+  }
+
+  Future<void> _switchAccount(String accountId) async {
+    if (accountId == _activeAccountId) {
+      return;
+    }
+
+    setState(() => _isLoading = true);
+
+    try {
+      final settings = SettingsService();
+      final selectedAccount = _accounts.firstWhere(
+        (account) => account.id == accountId,
+      );
+
+      await settings.switchAccount(accountId);
+      await DBHelper.close();
+
+      if (!mounted) {
+        return;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Switched to ${selectedAccount.name}')),
+      );
+      Navigator.of(context).pop(true);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Unable to switch account: $e')),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+    }
   }
 
   Future<void> _loadAppVersion() async {
@@ -79,11 +246,13 @@ class _SettingsPageState extends State<SettingsPage> {
   Future<(String, String, Uint8List)> _createBackupData() async {
     final entries = await ExpenseRepository.getAllEntries(orderBy: 'date DESC');
     final tags = await ExpenseRepository.getAllTags();
+    final groups = await ExpenseRepository.getAllTagGroups();
 
     final exportData = {
       'exportDate': DateTime.now().toIso8601String(),
       'appVersion': _appVersionLabel.replaceFirst('Version ', ''),
       'currency': _selectedCurrencyCode,
+      'tagGroups': groups.map((g) => g.toMap()).toList(),
       'tags': tags.map((t) => t.toMap()).toList(),
       'entries': entries.map((e) => e.toMap()).toList(),
     };
@@ -348,6 +517,9 @@ class _SettingsPageState extends State<SettingsPage> {
 
   Future<void> _processImport(Map<String, dynamic> importData, String mode) async {
     final importedCurrency = importData['currency'] as String?;
+    final importedGroups = (importData['tagGroups'] as List? ?? const [])
+        .map((group) => Map<String, dynamic>.from(group as Map))
+        .toList();
     final importedTags = (importData['tags'] as List)
         .map((tag) => Map<String, dynamic>.from(tag as Map))
         .toList();
@@ -355,11 +527,27 @@ class _SettingsPageState extends State<SettingsPage> {
         .map((entry) => Map<String, dynamic>.from(entry as Map))
         .toList();
 
+    final importedGroupIds = <int>{};
+    for (final groupMap in importedGroups) {
+      final oldId = (groupMap['id'] as num?)?.toInt();
+      final groupName = (groupMap['name'] as String?)?.trim() ?? '';
+
+      if (oldId == null) {
+        throw const FormatException('Each imported group must include an id.');
+      }
+      if (groupName.isEmpty) {
+        throw const FormatException('Imported groups must have a name.');
+      }
+
+      importedGroupIds.add(oldId);
+    }
+
     final importedTagIds = <int>{};
     for (final tagMap in importedTags) {
       final oldId = (tagMap['id'] as num?)?.toInt();
       final tagName = (tagMap['name'] as String?)?.trim() ?? '';
       final tagType = tagMap['type'] as String?;
+      final groupId = (tagMap['group_id'] as num?)?.toInt();
 
       if (oldId == null) {
         throw const FormatException('Each imported tag must include an id.');
@@ -369,6 +557,9 @@ class _SettingsPageState extends State<SettingsPage> {
       }
       if (tagType != 'expense' && tagType != 'income') {
         throw FormatException('Invalid tag type found for "$tagName".');
+      }
+      if (groupId != null && !importedGroupIds.contains(groupId)) {
+        throw FormatException('Imported tag "$tagName" references an unknown group id: $groupId');
       }
 
       importedTagIds.add(oldId);
@@ -383,20 +574,48 @@ class _SettingsPageState extends State<SettingsPage> {
 
     final db = await DBHelper.database;
 
-    final importCounts = await db.transaction<(int, int)>((txn) async {
+    final importCounts = await db.transaction<(int, int, int)>((txn) async {
       if (mode == 'replace') {
         await txn.delete('entries');
         await txn.delete('tags');
+        await txn.delete('tag_groups');
       }
 
+      final groupIdMap = <int, int>{};
       final tagIdMap = <int, int>{};
+      var importedGroupCount = 0;
       var importedTagCount = 0;
       var importedEntryCount = 0;
+
+      for (final groupMap in importedGroups) {
+        final oldId = (groupMap['id'] as num).toInt();
+        final groupName = (groupMap['name'] as String).trim();
+
+        if (mode == 'merge') {
+          final existing = await txn.query(
+            'tag_groups',
+            where: 'LOWER(name) = LOWER(?)',
+            whereArgs: [groupName],
+            limit: 1,
+          );
+
+          if (existing.isNotEmpty) {
+            groupIdMap[oldId] = existing.first['id'] as int;
+            continue;
+          }
+        }
+
+        final newId = await txn.insert('tag_groups', {'name': groupName});
+        importedGroupCount++;
+        groupIdMap[oldId] = newId;
+      }
 
       for (final tagMap in importedTags) {
         final oldId = (tagMap['id'] as num).toInt();
         final tagName = (tagMap['name'] as String).trim();
         final tagType = tagMap['type'] as String;
+        final oldGroupId = (tagMap['group_id'] as num?)?.toInt();
+        final newGroupId = oldGroupId == null ? null : groupIdMap[oldGroupId];
 
         if (mode == 'merge') {
           final existing = await txn.query(
@@ -407,7 +626,16 @@ class _SettingsPageState extends State<SettingsPage> {
           );
 
           if (existing.isNotEmpty) {
-            tagIdMap[oldId] = existing.first['id'] as int;
+            final existingId = existing.first['id'] as int;
+            tagIdMap[oldId] = existingId;
+            if (newGroupId != null) {
+              await txn.update(
+                'tags',
+                {'group_id': newGroupId},
+                where: 'id = ? AND group_id IS NULL',
+                whereArgs: [existingId],
+              );
+            }
             continue;
           }
         }
@@ -415,6 +643,7 @@ class _SettingsPageState extends State<SettingsPage> {
         final newId = await txn.insert('tags', {
           'name': tagName,
           'type': tagType,
+          'group_id': newGroupId,
         });
 
         importedTagCount++;
@@ -456,7 +685,7 @@ class _SettingsPageState extends State<SettingsPage> {
         importedEntryCount++;
       }
 
-      return (importedTagCount, importedEntryCount);
+      return (importedGroupCount, importedTagCount, importedEntryCount);
     });
 
     if (importedCurrency != null && _currencies.containsKey(importedCurrency)) {
@@ -470,9 +699,10 @@ class _SettingsPageState extends State<SettingsPage> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-              'Import successful! '
-                  '${importCounts.$1} tags, '
-                  '${importCounts.$2} entries imported.'
+                  'Import successful! '
+                  '${importCounts.$1} groups, '
+                  '${importCounts.$2} tags, '
+                  '${importCounts.$3} entries imported.'
           ),
         ),
       );
@@ -576,6 +806,58 @@ class _SettingsPageState extends State<SettingsPage> {
           ? const Center(child: CircularProgressIndicator())
           : ListView(
         children: [
+          _buildSectionHeader('Account'),
+          Card(
+            margin: const EdgeInsets.symmetric(horizontal: 12),
+            child: Column(
+              children: [
+                for (final account in _accounts)
+                  ListTile(
+                    leading: CircleAvatar(
+                      child: Text(
+                        account.name.substring(0, 1).toUpperCase(),
+                      ),
+                    ),
+                    title: Text(account.name),
+                    subtitle: Text(
+                      account.id == _activeAccountId
+                          ? 'Current session'
+                          : 'Tap to switch session',
+                    ),
+                    trailing: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          account.id == _activeAccountId
+                              ? Icons.check_circle
+                              : Icons.radio_button_unchecked,
+                          color: account.id == _activeAccountId
+                              ? Theme.of(context).colorScheme.primary
+                              : Theme.of(context).disabledColor,
+                        ),
+                        IconButton(
+                          tooltip: 'Edit account name',
+                          icon: const Icon(Icons.edit_outlined),
+                          color: Theme.of(context).colorScheme.primary,
+                          onPressed: () => _renameAccount(account),
+                        ),
+                      ],
+                    ),
+                    onTap: () => _switchAccount(account.id),
+                  ),
+                const Divider(height: 1),
+                ListTile(
+                  leading: const Icon(Icons.person_add_alt_1),
+                  title: const Text('Add Account'),
+                  subtitle: const Text('Create another separate session'),
+                  onTap: _addAccount,
+                ),
+              ],
+            ),
+          ),
+
+          const Divider(),
+
           _buildSectionHeader('Currency'),
           ListTile(
             leading: const Icon(Icons.attach_money),

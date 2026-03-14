@@ -1,6 +1,8 @@
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
 
+import '../services/settings_service.dart';
+
 class DatabaseException implements Exception {
   final String message;
   DatabaseException(this.message);
@@ -11,32 +13,37 @@ class DatabaseException implements Exception {
 class DBHelper {
   static Database? _db;
   static Future<Database>? _initializationFuture;
-  static const String _databaseName = 'expenses.db';
-  static const int _databaseVersion = 3;
+  static String? _initializationPath;
+  static const int _databaseVersion = 4;
 
   static Future<Database> get database async {
-    if (_db != null && _db!.isOpen) {
+    final path = await _getDatabasePath();
+
+    if (_db != null && _db!.isOpen && _db!.path == path) {
       return _db!;
     }
 
-    if (_initializationFuture != null) {
+    if (_db != null && _db!.isOpen && _db!.path != path) {
+      await close();
+    }
+
+    if (_initializationFuture != null && _initializationPath == path) {
       return _initializationFuture!;
     }
 
-    _initializationFuture = _initDB();
+    _initializationPath = path;
+    _initializationFuture = _initDB(path);
     try {
       _db = await _initializationFuture!;
       return _db!;
     } finally {
       _initializationFuture = null;
+      _initializationPath = null;
     }
   }
 
-  static Future<Database> _initDB() async {
+  static Future<Database> _initDB(String path) async {
     try {
-      final dbPath = await getDatabasesPath();
-      final path = join(dbPath, _databaseName);
-
       // Check if we need to delete old/corrupted database
       await _validateOrRecreateDatabase(path);
 
@@ -55,6 +62,12 @@ class DBHelper {
     } catch (e) {
       throw DatabaseException('Failed to initialize database: $e');
     }
+  }
+
+  static Future<String> _getDatabasePath() async {
+    final dbPath = await getDatabasesPath();
+    final databaseName = SettingsService().getCurrentDatabaseName();
+    return join(dbPath, databaseName);
   }
 
   /// Validates existing database schema before opening it normally.
@@ -96,11 +109,21 @@ class DBHelper {
 
   static Future<void> _onCreate(Database db, int version) async {
     await db.execute('''
+      CREATE TABLE tag_groups(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    ''');
+
+    await db.execute('''
       CREATE TABLE tags(
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT NOT NULL,
         type TEXT NOT NULL CHECK(type IN ('expense', 'income')),
+        group_id INTEGER,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        ,FOREIGN KEY(group_id) REFERENCES tag_groups(id) ON DELETE SET NULL
       )
     ''');
 
@@ -119,6 +142,8 @@ class DBHelper {
     await db.execute('CREATE INDEX idx_entries_date ON entries(date)');
     await db.execute('CREATE INDEX idx_entries_tag ON entries(tag_id)');
     await _createTagUniqueIndex(db);
+    await _createTagGroupUniqueIndex(db);
+    await _createTagGroupIndex(db);
   }
 
   static Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
@@ -134,6 +159,23 @@ class DBHelper {
     if (oldVersion < 3) {
       await _mergeDuplicateTags(db);
       await _createTagUniqueIndex(db);
+    }
+
+    if (oldVersion < 4) {
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS tag_groups(
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          name TEXT NOT NULL,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+      ''');
+      try {
+        await db.execute(
+          'ALTER TABLE tags ADD COLUMN group_id INTEGER REFERENCES tag_groups(id) ON DELETE SET NULL',
+        );
+      } catch (_) {}
+      await _createTagGroupUniqueIndex(db);
+      await _createTagGroupIndex(db);
     }
   }
 
@@ -178,6 +220,19 @@ class DBHelper {
     await db.execute(
       'CREATE UNIQUE INDEX IF NOT EXISTS idx_tags_name_type_unique '
       'ON tags(name COLLATE NOCASE, type)',
+    );
+  }
+
+  static Future<void> _createTagGroupUniqueIndex(Database db) async {
+    await db.execute(
+      'CREATE UNIQUE INDEX IF NOT EXISTS idx_tag_groups_name_unique '
+      'ON tag_groups(name COLLATE NOCASE)',
+    );
+  }
+
+  static Future<void> _createTagGroupIndex(Database db) async {
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_tags_group_id ON tags(group_id)',
     );
   }
 
@@ -280,8 +335,7 @@ class DBHelper {
 
   static Future<void> resetDatabase() async {
     try {
-      final dbPath = await getDatabasesPath();
-      final path = join(dbPath, _databaseName);
+      final path = await _getDatabasePath();
 
       await close();
       await deleteDatabase(path);

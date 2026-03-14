@@ -66,6 +66,7 @@ class _ExpenseHomeState extends State<ExpenseHome> {
   String _currencySymbol = '₱';
   String _currencyCode = 'PHP';
   bool _isCheckingForUpdates = false;
+  bool _sortByGroup = true;
 
   @override
   void initState() {
@@ -254,6 +255,36 @@ class _ExpenseHomeState extends State<ExpenseHome> {
     }
   }
 
+  List<Entry> _sortedEntries() {
+    final sortedEntries = List<Entry>.from(_entries);
+    if (!_sortByGroup) {
+      return sortedEntries;
+    }
+
+    sortedEntries.sort((left, right) {
+      final leftTag = _getTagForEntry(left);
+      final rightTag = _getTagForEntry(right);
+
+      final leftGroup = leftTag?.normalizedGroupName ?? 'Ungrouped';
+      final rightGroup = rightTag?.normalizedGroupName ?? 'Ungrouped';
+      final groupCompare = leftGroup.toLowerCase().compareTo(rightGroup.toLowerCase());
+      if (groupCompare != 0) {
+        return groupCompare;
+      }
+
+      final leftTagName = leftTag?.name.toLowerCase() ?? '';
+      final rightTagName = rightTag?.name.toLowerCase() ?? '';
+      final tagCompare = leftTagName.compareTo(rightTagName);
+      if (tagCompare != 0) {
+        return tagCompare;
+      }
+
+      return right.date.compareTo(left.date);
+    });
+
+    return sortedEntries;
+  }
+
   String _formatMoney(double amount, {bool absolute = false}) {
     final value = absolute ? amount.abs() : amount;
     final sign = !absolute && value < 0 ? '-' : '';
@@ -358,6 +389,8 @@ class _ExpenseHomeState extends State<ExpenseHome> {
   }
 
   Widget _buildContent(ColorScheme colorScheme) {
+    final sortedEntries = _sortedEntries();
+
     return Column(
       children: [
         // Balance Card
@@ -421,6 +454,39 @@ class _ExpenseHomeState extends State<ExpenseHome> {
           ),
         ),
 
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+          child: Row(
+            children: [
+              const Text(
+                'Entries',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+              ),
+              const Spacer(),
+              ActionChip(
+                avatar: Icon(
+                  _sortByGroup ? Icons.sort_by_alpha : Icons.sort,
+                  size: 18,
+                  color: colorScheme.primary,
+                ),
+                label: Text(_sortByGroup ? 'Grouped' : 'Default order'),
+                labelStyle: TextStyle(
+                  color: colorScheme.primary,
+                  fontWeight: FontWeight.w600,
+                ),
+                backgroundColor: colorScheme.primary.withValues(alpha: 0.08),
+                side: BorderSide(color: colorScheme.primary.withValues(alpha: 0.18)),
+                tooltip: _sortByGroup ? 'Grouped Sorting On' : 'Grouped Sorting Off',
+                onPressed: () {
+                  setState(() {
+                    _sortByGroup = !_sortByGroup;
+                  });
+                },
+              ),
+            ],
+          ),
+        ),
+
         const SizedBox(height: 16),
 
         // Entries List
@@ -444,10 +510,10 @@ class _ExpenseHomeState extends State<ExpenseHome> {
             ),
           )
               : ListView.builder(
-            itemCount: _entries.length,
+            itemCount: sortedEntries.length,
             padding: const EdgeInsets.symmetric(horizontal: 16),
             itemBuilder: (context, index) {
-              final entry = _entries[index];
+              final entry = sortedEntries[index];
               final tag = _getTagForEntry(entry);
               return _buildEntryTile(entry, tag);
             },
@@ -544,13 +610,41 @@ class _ExpenseHomeState extends State<ExpenseHome> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               if (tag != null)
-                Row(
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  crossAxisAlignment: WrapCrossAlignment.center,
                   children: [
-                    Icon(Icons.label, size: 14, color: tag.type.color),
-                    const SizedBox(width: 4),
-                    Text(
-                      tag.name,
-                      style: TextStyle(color: tag.type.color, fontSize: 12),
+                    if (tag.hasGroup)
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 3,
+                        ),
+                        decoration: BoxDecoration(
+                          color: color.withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: color.withValues(alpha: 0.25)),
+                        ),
+                        child: Text(
+                          tag.groupName!,
+                          style: TextStyle(
+                            color: color,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.label, size: 14, color: tag.type.color),
+                        const SizedBox(width: 4),
+                        Text(
+                          tag.name,
+                          style: TextStyle(color: tag.type.color, fontSize: 12),
+                        ),
+                      ],
                     ),
                   ],
                 ),

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -53,9 +54,16 @@ class UpdateInstallResult {
   });
 }
 
+class _LatestReleaseFetchResult {
+  final Map<String, dynamic>? release;
+  final String? message;
+
+  const _LatestReleaseFetchResult({this.release, this.message});
+}
+
 class UpdateService {
   static const String _owner = 'keen1234';
-  static const String _repo = 'exspense_tracker';
+  static const String _repo = 'exspense-_tracker';
 
   Future<UpdateCheckResult> checkForUpdate() async {
     if (!Platform.isAndroid) {
@@ -71,12 +79,13 @@ class UpdateService {
     final currentBuildNumber = int.tryParse(packageInfo.buildNumber) ?? 0;
     final currentVersionLabel = currentVersion;
 
-    final release = await _fetchLatestRelease();
+    final releaseResult = await _fetchLatestRelease();
+    final release = releaseResult.release;
     if (release == null) {
       return UpdateCheckResult(
         availability: UpdateAvailability.unavailable,
         currentVersionLabel: currentVersionLabel,
-        message: 'Unable to check for updates right now.',
+        message: releaseResult.message ?? 'Unable to check for updates right now.',
       );
     }
 
@@ -357,29 +366,79 @@ class UpdateService {
     return launchUrl(uri, mode: LaunchMode.externalApplication);
   }
 
-  Future<Map<String, dynamic>?> _fetchLatestRelease() async {
+  Future<_LatestReleaseFetchResult> _fetchLatestRelease() async {
     final client = HttpClient();
+    client.connectionTimeout = const Duration(seconds: 15);
+
     try {
       final request = await client.getUrl(
         Uri.parse('https://api.github.com/repos/$_owner/$_repo/releases/latest'),
-      );
+      ).timeout(const Duration(seconds: 15));
       request.headers.set(HttpHeaders.acceptHeader, 'application/vnd.github+json');
       request.headers.set(HttpHeaders.userAgentHeader, 'expense-tracker-app');
 
-      final response = await request.close();
-      if (response.statusCode != HttpStatus.ok) {
-        return null;
+      final response = await request.close().timeout(const Duration(seconds: 15));
+      final responseBody = await response
+          .transform(utf8.decoder)
+          .join()
+          .timeout(const Duration(seconds: 15));
+
+      if (response.statusCode == HttpStatus.notFound) {
+        return const _LatestReleaseFetchResult(
+          message: 'GitHub repository or latest release was not found.',
+        );
       }
 
-      final responseBody = await response.transform(utf8.decoder).join();
+      if (response.statusCode != HttpStatus.ok) {
+        String? apiMessage;
+        try {
+          final decodedError = jsonDecode(responseBody);
+          if (decodedError is Map && decodedError['message'] is String) {
+            apiMessage = (decodedError['message'] as String).trim();
+          }
+        } catch (_) {
+          apiMessage = null;
+        }
+
+        return _LatestReleaseFetchResult(
+          message: apiMessage != null && apiMessage.isNotEmpty
+              ? 'GitHub update check failed: $apiMessage'
+              : 'GitHub update check failed with status ${response.statusCode}.',
+        );
+      }
+
       final decoded = jsonDecode(responseBody);
       if (decoded is Map<String, dynamic>) {
-        return decoded;
+        return _LatestReleaseFetchResult(release: decoded);
       }
       if (decoded is Map) {
-        return Map<String, dynamic>.from(decoded);
+        return _LatestReleaseFetchResult(
+          release: Map<String, dynamic>.from(decoded),
+        );
       }
-      return null;
+      return const _LatestReleaseFetchResult(
+        message: 'GitHub returned an invalid release response.',
+      );
+    } on SocketException {
+      return const _LatestReleaseFetchResult(
+        message: 'No internet connection. Please check your network and try again.',
+      );
+    } on TimeoutException {
+      return const _LatestReleaseFetchResult(
+        message: 'Update check timed out. Please try again in a moment.',
+      );
+    } on HandshakeException {
+      return const _LatestReleaseFetchResult(
+        message: 'A secure connection to GitHub could not be established.',
+      );
+    } on FormatException {
+      return const _LatestReleaseFetchResult(
+        message: 'GitHub returned unreadable release data.',
+      );
+    } catch (e) {
+      return _LatestReleaseFetchResult(
+        message: 'Unable to check for updates right now: $e',
+      );
     } finally {
       client.close(force: true);
     }

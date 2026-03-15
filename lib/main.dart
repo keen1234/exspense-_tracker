@@ -83,9 +83,13 @@ class _ExpenseHomeState extends State<ExpenseHome> {
       return;
     }
 
+    final updateService = UpdateService();
+    if (!updateService.supportsInAppUpdates) {
+      return;
+    }
+
     _isCheckingForUpdates = true;
     try {
-      final updateService = UpdateService();
       final updateResult = await updateService.checkForUpdate();
       if (!mounted || !updateResult.hasUpdate) {
         return;

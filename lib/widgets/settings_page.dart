@@ -797,6 +797,7 @@ class _SettingsPageState extends State<SettingsPage> {
   @override
   Widget build(BuildContext context) {
     final selectedCurrency = _currencies[_selectedCurrencyCode]!;
+    final updateService = UpdateService();
 
     return Scaffold(
       appBar: AppBar(
@@ -909,8 +910,8 @@ class _SettingsPageState extends State<SettingsPage> {
 
           ListTile(
             leading: const Icon(Icons.system_update_alt, color: Colors.orange),
-            title: const Text('Check for Updates'),
-            subtitle: const Text('Check the latest required app version'),
+            title: Text(updateService.settingsTitle),
+            subtitle: Text(updateService.settingsSubtitle),
             onTap: _checkForUpdates,
           ),
 

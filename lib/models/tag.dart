@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 enum TagType { expense, income }
 
 extension TagTypeExtension on TagType {
-  String get name => toString().split('.').last;
   Color get color => this == TagType.income ? Colors.green : Colors.red;
   IconData get icon => this == TagType.income ? Icons.arrow_upward : Icons.arrow_downward;
 }

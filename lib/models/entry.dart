@@ -39,23 +39,19 @@ class Entry {
   bool get isExpense => amount < 0;
   double get absoluteAmount => amount.abs();
 
-  String get formattedAmount {
-    final formatter = NumberFormat.currency(symbol: '₱', decimalDigits: 2);
-    return formatter.format(amount);
-  }
-
-  String get formattedAbsoluteAmount {
-    final formatter = NumberFormat.currency(symbol: '₱', decimalDigits: 2);
-    return formatter.format(absoluteAmount);
-  }
-
-  String formatAmount({String symbol = '₱'}) {
-    final formatter = NumberFormat.currency(symbol: symbol, decimalDigits: 2);
-    return formatter.format(amount);
-  }
-
-  String formatAbsoluteAmount({String symbol = '₱'}) {
-    final formatter = NumberFormat.currency(symbol: symbol, decimalDigits: 2);
-    return formatter.format(absoluteAmount);
+  Entry copyWith({
+    int? id,
+    double? amount,
+    DateTime? date,
+    String? note,
+    int? tagId,
+  }) {
+    return Entry(
+      id: id ?? this.id,
+      amount: amount ?? this.amount,
+      date: date ?? this.date,
+      note: note ?? this.note,
+      tagId: tagId ?? this.tagId,
+    );
   }
 }

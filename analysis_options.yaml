@@ -9,6 +9,9 @@
 # packages, and plugins designed to encourage good coding practices.
 include: package:flutter_lints/flutter.yaml
 
+# NOTE: Consider migrating to `package:lints/recommended.yaml` (official Dart lints)
+# when upgrading dependencies. flutter_lints is deprecated in favor of flutter_lints 5.x+.
+
 linter:
   # The lint rules applied to this project can be customized in the
   # section below to disable rules from the `package:flutter_lints/flutter.yaml`

@@ -1,13 +1,17 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'dart:math' as math;
+import '../models/currencies.dart';
 
 class CalculatorDialog extends StatefulWidget {
   final Function(double result) onUseResult;
+  final String currencyCode;
 
   const CalculatorDialog({
     super.key,
     required this.onUseResult,
+    this.currencyCode = 'PHP',
   });
 
   @override
@@ -18,7 +22,10 @@ class _CalculatorDialogState extends State<CalculatorDialog>
     with SingleTickerProviderStateMixin {
   static const String _multiply = '×';
   static const String _divide = '÷';
-  static const List<int> _cashDenominations = [1, 5, 10, 20, 50, 100, 500, 1000];
+  static const List<int> _defaultDenominations = [1, 5, 10, 20, 50, 100, 500, 1000];
+
+  List<int> get _cashDenominations =>
+      currencies[widget.currencyCode]?.denominations ?? _defaultDenominations;
 
   String _display = '0';
   String _expression = '';
@@ -26,6 +33,7 @@ class _CalculatorDialogState extends State<CalculatorDialog>
   final List<String> _history = [];
   late final TabController _tabController;
   late final Map<int, TextEditingController> _denominationControllers;
+  Timer? _denominationDebounce;
   int _activeTabIndex = 0;
 
   @override
@@ -45,11 +53,19 @@ class _CalculatorDialogState extends State<CalculatorDialog>
 
   @override
   void dispose() {
+    _denominationDebounce?.cancel();
     _tabController.dispose();
     for (final controller in _denominationControllers.values) {
       controller.dispose();
     }
     super.dispose();
+  }
+
+  void _scheduleDenominationUpdate() {
+    _denominationDebounce?.cancel();
+    _denominationDebounce = Timer(const Duration(milliseconds: 300), () {
+      if (mounted) setState(() {});
+    });
   }
 
   void _onNumberPress(String number) {
@@ -200,7 +216,7 @@ class _CalculatorDialogState extends State<CalculatorDialog>
       final range = _findLastOperandRange();
       if (range == null) return;
       final operand = _expression.substring(range.$1, range.$2);
-      _expression = _expression.replaceRange(range.$1, range.$2, '($operand$_divide100Expression)');
+      _expression = _expression.replaceRange(range.$1, range.$2, '($operand${_divide}100)');
       _refreshDisplay();
     });
   }
@@ -601,8 +617,6 @@ class _CalculatorDialogState extends State<CalculatorDialog>
     return operator == '^' || operator == '√';
   }
 
-  String get _divide100Expression => '${_divide}100';
-
   @override
   Widget build(BuildContext context) {
     final dialogHeight = math.min(
@@ -928,7 +942,7 @@ class _CalculatorDialogState extends State<CalculatorDialog>
                   border: OutlineInputBorder(),
                   isDense: true,
                 ),
-                onChanged: (_) => setState(() {}),
+                onChanged: (_) => _scheduleDenominationUpdate(),
               ),
             ),
           ],

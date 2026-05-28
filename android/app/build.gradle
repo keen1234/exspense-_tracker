@@ -61,6 +61,7 @@ android {
                 signingConfig signingConfigs.debug
                 logger.lifecycle("android/key.properties not found. Using debug signing so the release APK remains installable on local devices.")
             }
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
     }
 }

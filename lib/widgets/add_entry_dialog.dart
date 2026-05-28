@@ -9,14 +9,24 @@ class AddEntryDialog extends StatefulWidget {
   final Future<bool> Function(Entry) onSaveEntry;
   final List<Tag> tags;
   final String currencySymbol;
+  final String currencyCode;
   final Entry? initialEntry;
+  final double? initialAmount;
+  final String? initialNote;
+  final DateTime? initialDate;
+  final String? initialReceiptSummary;
 
   const AddEntryDialog({
     super.key,
     required this.onSaveEntry,
     required this.tags,
     this.currencySymbol = '₱',
+    this.currencyCode = 'PHP',
     this.initialEntry,
+    this.initialAmount,
+    this.initialNote,
+    this.initialDate,
+    this.initialReceiptSummary,
   });
 
   @override
@@ -42,11 +52,18 @@ class _AddEntryDialogState extends State<AddEntryDialog> {
   void initState() {
     super.initState();
     final initialEntry = widget.initialEntry;
-    _selectedDate = _normalizeDate(initialEntry?.date ?? DateTime.now());
+    _selectedDate = _normalizeDate(initialEntry?.date ?? widget.initialDate ?? DateTime.now());
     if (initialEntry != null) {
       _amountController.text = initialEntry.absoluteAmount.toStringAsFixed(2);
       _noteController.text = initialEntry.note ?? '';
       _selectedTagId = initialEntry.tagId;
+    } else {
+      if (widget.initialAmount != null && widget.initialAmount! > 0) {
+        _amountController.text = widget.initialAmount!.toStringAsFixed(2);
+      }
+      if (widget.initialNote != null && widget.initialNote!.isNotEmpty) {
+        _noteController.text = widget.initialNote!;
+      }
     }
   }
 
@@ -95,6 +112,7 @@ class _AddEntryDialogState extends State<AddEntryDialog> {
     showDialog(
       context: context,
       builder: (context) => CalculatorDialog(
+        currencyCode: widget.currencyCode,
         onUseResult: (result) {
           setState(() {
             _amountController.text = result.toStringAsFixed(2);
@@ -133,7 +151,7 @@ class _AddEntryDialogState extends State<AddEntryDialog> {
       if (!mounted) return;
 
       if (saved) {
-        Navigator.of(context).pop();
+        if (mounted) Navigator.of(context).pop(true);
         return;
       }
     } catch (e) {
@@ -156,26 +174,28 @@ class _AddEntryDialogState extends State<AddEntryDialog> {
 
     return AlertDialog(
       title: Text(widget.initialEntry == null ? 'Add Entry' : 'Edit Entry'),
-      content: Form(
-        key: _formKey,
-        child: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: TextFormField(
-                        controller: _amountController,
-                        decoration: InputDecoration(
-                          labelText: 'Amount',
-                          prefixText: widget.currencySymbol,
-                          border: const OutlineInputBorder(),
-                        ),
+      content: SizedBox(
+        width: double.maxFinite,
+        child: Form(
+          key: _formKey,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextFormField(
+                          controller: _amountController,
+                          decoration: InputDecoration(
+                            labelText: 'Amount',
+                            prefixText: widget.currencySymbol,
+                            border: const OutlineInputBorder(),
+                          ),
                       keyboardType: const TextInputType.numberWithOptions(decimal: true),
                       inputFormatters: [
-                        FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d{0,2}')),
+                        FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d{0,2}$')),
                       ],
                       validator: _validateAmount,
                       autofocus: true,
@@ -209,6 +229,34 @@ class _AddEntryDialogState extends State<AddEntryDialog> {
                 ),
               ),
               const SizedBox(height: 16),
+
+              if (widget.initialReceiptSummary != null) ...[
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.primaryContainer.withValues(alpha: 0.3),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.3),
+                    ),
+                  ),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(Icons.receipt_long, size: 18, color: Theme.of(context).colorScheme.primary),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          widget.initialReceiptSummary!,
+                          style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurface),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+              ],
 
               TextFormField(
                 controller: _noteController,
@@ -325,28 +373,34 @@ class _AddEntryDialogState extends State<AddEntryDialog> {
                         ),
                       ),
                     ],
-                  ],
-                ),
-            ],
+                ],
+              ),
+              const SizedBox(height: 20),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  TextButton(
+                    onPressed: _isSaving ? null : () => Navigator.of(context).pop(false),
+                    child: const Text('Cancel'),
+                  ),
+                  const SizedBox(width: 8),
+                  ElevatedButton(
+                    onPressed: widget.tags.isEmpty || _isSaving ? null : _submit,
+                    child: _isSaving
+                        ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                        : Text(widget.initialEntry == null ? 'Save Entry' : 'Update Entry'),
+                  ),
+                ],
+              ),
+              ],
+            ),
           ),
         ),
       ),
-      actions: [
-        TextButton(
-          onPressed: _isSaving ? null : () => Navigator.of(context).pop(),
-          child: const Text('Cancel'),
-        ),
-        ElevatedButton(
-          onPressed: widget.tags.isEmpty || _isSaving ? null : _submit,
-          child: _isSaving
-              ? const SizedBox(
-            width: 20,
-            height: 20,
-            child: CircularProgressIndicator(strokeWidth: 2),
-          )
-              : Text(widget.initialEntry == null ? 'Save Entry' : 'Update Entry'),
-        ),
-      ],
     );
   }
 

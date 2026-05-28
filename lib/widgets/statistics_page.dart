@@ -1,15 +1,19 @@
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 
 import '../models/entry.dart';
 import '../models/tag.dart';
 import '../repositories/expense_repository.dart';
+import 'calculator_dialog.dart' show CalculatorDialog;
 
 class StatisticsPage extends StatefulWidget {
   final String currencySymbol;
+  final String currencyCode;
+  final VoidCallback? onOpenSettings;
 
-  const StatisticsPage({super.key, this.currencySymbol = '₱'});
+  const StatisticsPage({super.key, this.currencySymbol = '₱', this.currencyCode = 'PHP', this.onOpenSettings});
 
   @override
   State<StatisticsPage> createState() => _StatisticsPageState();
@@ -21,6 +25,7 @@ class _StatisticsPageState extends State<StatisticsPage>
   List<Entry> _entries = [];
   List<Tag> _tags = [];
   bool _isLoading = true;
+  Map<String, dynamic>? _cachedStats;
 
   DateTime _startDate = DateTime.now().subtract(const Duration(days: 30));
   DateTime _endDate = DateTime.now();
@@ -39,6 +44,20 @@ class _StatisticsPageState extends State<StatisticsPage>
     super.dispose();
   }
 
+  void _onCalcResult(double result) {
+    if (!mounted) return;
+    final text = '${widget.currencySymbol}${result.toStringAsFixed(2)}';
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Calculated: $text'),
+        action: SnackBarAction(
+          label: 'Copy',
+          onPressed: () => Clipboard.setData(ClipboardData(text: text)),
+        ),
+      ),
+    );
+  }
+
   Future<void> _loadData() async {
     setState(() => _isLoading = true);
     try {
@@ -50,10 +69,16 @@ class _StatisticsPageState extends State<StatisticsPage>
       setState(() {
         _entries = entries;
         _tags = tags;
+        _cachedStats = null;
         _isLoading = false;
       });
-    } catch (_) {
+    } catch (e) {
       setState(() => _isLoading = false);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to load statistics: $e')),
+        );
+      }
     }
   }
 
@@ -92,9 +117,11 @@ class _StatisticsPageState extends State<StatisticsPage>
   }
 
   Map<String, dynamic> _calculateStats() {
+    if (_cachedStats != null) return _cachedStats!;
     double totalIncome = 0;
     double totalExpense = 0;
     final tagTotals = <int, double>{};
+    final tagTypes = <int, TagType>{};
     final groupTotals = <String, double>{};
     final dailyTotals = <String, double>{};
     final monthlyTotals = <String, double>{};
@@ -110,6 +137,7 @@ class _StatisticsPageState extends State<StatisticsPage>
       }
 
       tagTotals[entry.tagId] = (tagTotals[entry.tagId] ?? 0) + entry.amount.abs();
+      tagTypes[entry.tagId] = tag?.type ?? (entry.isIncome ? TagType.income : TagType.expense);
       groupTotals[groupName] = (groupTotals[groupName] ?? 0) + entry.amount.abs();
 
       final dayKey = DateFormat('yyyy-MM-dd').format(entry.date);
@@ -119,23 +147,24 @@ class _StatisticsPageState extends State<StatisticsPage>
       monthlyTotals[monthKey] = (monthlyTotals[monthKey] ?? 0) + entry.amount;
     }
 
-    return {
+    _cachedStats = {
       'income': totalIncome,
       'expense': totalExpense,
       'balance': totalIncome - totalExpense,
       'tagTotals': tagTotals,
+      'tagTypes': tagTypes,
       'groupTotals': groupTotals,
       'dailyTotals': dailyTotals,
       'monthlyTotals': monthlyTotals,
     };
+    return _cachedStats!;
   }
 
   Tag? _tagById(int tagId) {
-    try {
-      return _tags.firstWhere((tag) => tag.id == tagId);
-    } catch (_) {
-      return null;
+    for (final tag in _tags) {
+      if (tag.id == tagId) return tag;
     }
+    return null;
   }
 
   String _formatMoney(double amount, {bool absolute = false}) {
@@ -148,7 +177,44 @@ class _StatisticsPageState extends State<StatisticsPage>
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Statistics'),
+        title: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('Statistics'),
+            const SizedBox(height: 2),
+            PopupMenuButton<String>(
+              initialValue: _selectedPeriod,
+              onSelected: _setPeriod,
+              itemBuilder: (context) => [
+                'Today',
+                'This Week',
+                'This Month',
+                'Last 30 Days',
+                'This Year',
+                'All Time',
+              ]
+                  .map((period) => PopupMenuItem(value: period, child: Text(period)))
+                  .toList(),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    _selectedPeriod,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                  Icon(
+                    Icons.arrow_drop_down,
+                    size: 18,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        centerTitle: true,
         bottom: TabBar(
           controller: _tabController,
           isScrollable: true,
@@ -161,29 +227,20 @@ class _StatisticsPageState extends State<StatisticsPage>
           ],
         ),
         actions: [
-          PopupMenuButton<String>(
-            initialValue: _selectedPeriod,
-            onSelected: _setPeriod,
-            itemBuilder: (context) => [
-              'Today',
-              'This Week',
-              'This Month',
-              'Last 30 Days',
-              'This Year',
-              'All Time',
-            ]
-                .map((period) => PopupMenuItem(value: period, child: Text(period)))
-                .toList(),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Row(
-                children: [
-                  Text(_selectedPeriod),
-                  const Icon(Icons.arrow_drop_down),
-                ],
-              ),
+          IconButton(
+            icon: const Icon(Icons.calculate),
+            tooltip: 'Calculator',
+            onPressed: () => showDialog(
+              context: context,
+              builder: (context) => CalculatorDialog(currencyCode: widget.currencyCode, onUseResult: _onCalcResult),
             ),
           ),
+          if (widget.onOpenSettings != null)
+            IconButton(
+              icon: const Icon(Icons.settings_rounded),
+              tooltip: 'Settings',
+              onPressed: widget.onOpenSettings,
+            ),
         ],
       ),
       body: _isLoading
@@ -444,6 +501,7 @@ class _StatisticsPageState extends State<StatisticsPage>
   Widget _buildCategoriesTab() {
     final stats = _calculateStats();
     final tagTotals = stats['tagTotals'] as Map<int, double>;
+    final tagTypes = stats['tagTypes'] as Map<int, TagType>;
 
     if (tagTotals.isEmpty) {
       return const Center(child: Text('No data available'));
@@ -461,15 +519,15 @@ class _StatisticsPageState extends State<StatisticsPage>
         final amount = sortedTags[index].value;
         final tag = _tags.firstWhere(
           (item) => item.id == tagId,
-          orElse: () => Tag(name: 'Unknown', type: TagType.expense),
+          orElse: () => Tag(name: 'Unknown', type: tagTypes[tagId] ?? TagType.expense),
         );
         final percentage = (amount / total) * 100;
 
         return Card(
           margin: const EdgeInsets.only(bottom: 8),
           child: ListTile(
-            leading: CircleAvatar(
-              backgroundColor: tag.type.color.withValues(alpha: 0.2),
+               leading: CircleAvatar(
+               backgroundColor: tag.type.color.withValues(alpha: 0.2),
               child: Icon(tag.type.icon, color: tag.type.color),
             ),
             title: Text(tag.name),
@@ -539,10 +597,10 @@ class _StatisticsPageState extends State<StatisticsPage>
         return Card(
           margin: const EdgeInsets.only(bottom: 8),
           child: ListTile(
-            leading: CircleAvatar(
-              backgroundColor: isPositive
-                  ? Colors.green.withValues(alpha: 0.2)
-                  : Colors.red.withValues(alpha: 0.2),
+               leading: CircleAvatar(
+               backgroundColor: isPositive
+                   ? Colors.green.withValues(alpha: 0.2)
+                   : Colors.red.withValues(alpha: 0.2),
               child: Icon(
                 isPositive ? Icons.arrow_upward : Icons.arrow_downward,
                 color: isPositive ? Colors.green : Colors.red,

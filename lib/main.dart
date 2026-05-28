@@ -1,32 +1,71 @@
+import 'dart:ui';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'database/db_helper.dart';
 import 'services/settings_service.dart';
 import 'services/update_service.dart';
+import 'models/currencies.dart';
 import 'models/entry.dart';
 import 'models/tag.dart';
 import 'repositories/expense_repository.dart';
 import 'widgets/add_entry_dialog.dart' show AddEntryDialog;
-import 'widgets/tag_manager_page.dart' show TagManagerPage;
-import 'widgets/statistics_page.dart' show StatisticsPage;
 import 'widgets/calculator_dialog.dart' show CalculatorDialog;
-import 'widgets/settings_page.dart' show SettingsPage;
+import 'widgets/app_shell.dart' show AppShell;
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
+  // Catch Flutter framework errors
+  FlutterError.onError = (details) {
+    FlutterError.presentError(details);
+  };
+
+  // Catch async errors not caught by Flutter
+  PlatformDispatcher.instance.onError = (error, stack) {
+    return true;
+  };
+
   // Initialize settings
   await SettingsService().init();
+
+  // Warn user if database had to be recreated due to corruption
+  DBHelper.onDatabaseReset = (reason) {
+    debugPrint('Database reset: $reason');
+  };
 
   runApp(const ExpenseApp());
 }
 
-class ExpenseApp extends StatelessWidget {
+class ExpenseApp extends StatefulWidget {
   const ExpenseApp({super.key});
+
+  @override
+  State<ExpenseApp> createState() => _ExpenseAppState();
+}
+
+class _ExpenseAppState extends State<ExpenseApp> {
+  @override
+  void initState() {
+    super.initState();
+    SettingsService.themeModeNotifier.addListener(_onThemeChanged);
+  }
+
+  void _onThemeChanged() {
+    if (mounted) setState(() {});
+  }
+
+  @override
+  void dispose() {
+    SettingsService.themeModeNotifier.removeListener(_onThemeChanged);
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Expense Tracker',
       debugShowCheckedModeBanner: false,
+      themeMode: SettingsService().getThemeMode(),
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(
           seedColor: Colors.blue,
@@ -45,37 +84,78 @@ class ExpenseApp extends StatelessWidget {
         ),
         useMaterial3: true,
       ),
-      home: const ExpenseHome(),
+      home: const AppShell(),
     );
   }
 }
 
 class ExpenseHome extends StatefulWidget {
-  const ExpenseHome({super.key});
+  final VoidCallback? onOpenSettings;
+
+  const ExpenseHome({super.key, this.onOpenSettings});
 
   @override
-  State<ExpenseHome> createState() => _ExpenseHomeState();
+  State<ExpenseHome> createState() => ExpenseHomeState();
 }
 
-class _ExpenseHomeState extends State<ExpenseHome> {
+class ExpenseHomeState extends State<ExpenseHome> with TickerProviderStateMixin {
   List<Entry> _entries = [];
   List<Tag> _tags = [];
   bool _isLoading = true;
   String? _errorMessage;
   double _balance = 0.0;
-  String _currencySymbol = '₱';
+  String _currencySymbol = '\u20b1';
   String _currencyCode = 'PHP';
   bool _isCheckingForUpdates = false;
   bool _sortByGroup = true;
 
+  // Staggered list entrance animation
+  late AnimationController _listAnimController;
+  late Animation<double> _balanceScale;
+  late Animation<double> _balanceFade;
+  late AnimationController _balanceController;
+
+  List<Tag> get tags => List.unmodifiable(_tags);
+  String get currencySymbol => _currencySymbol;
+  String get currencyCode => _currencyCode;
+
+  List<Entry>? _cachedSortedEntries;
+
+  Future<void> loadData() => _loadData();
+  Future<bool> addEntry(Entry entry) => _addEntry(entry);
+
   @override
   void initState() {
     super.initState();
+
+    _listAnimController = AnimationController(
+      duration: const Duration(milliseconds: 600),
+      vsync: this,
+    );
+
+    _balanceController = AnimationController(
+      duration: const Duration(milliseconds: 800),
+      vsync: this,
+    );
+    _balanceScale = Tween<double>(begin: 0.8, end: 1.0).animate(
+      CurvedAnimation(parent: _balanceController, curve: Curves.elasticOut),
+    );
+    _balanceFade = Tween<double>(begin: 0.0, end: 1.0).animate(
+      CurvedAnimation(parent: _balanceController, curve: Curves.easeOut),
+    );
+
     _loadSettings();
     _loadData();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _checkForUpdates();
     });
+  }
+
+  @override
+  void dispose() {
+    _listAnimController.dispose();
+    _balanceController.dispose();
+    super.dispose();
   }
 
   Future<void> _checkForUpdates() async {
@@ -104,17 +184,9 @@ class _ExpenseHomeState extends State<ExpenseHome> {
   void _loadSettings() {
     final settings = SettingsService();
     final currencyCode = settings.getCurrency();
-    final currencies = {
-      'PHP': '₱', 'USD': '\$', 'EUR': '€', 'GBP': '£', 'JPY': '¥',
-      'KRW': '₩', 'CNY': '¥', 'INR': '₹', 'AUD': 'A\$', 'CAD': 'C\$',
-      'CHF': 'Fr', 'SGD': 'S\$', 'HKD': 'HK\$', 'THB': '฿', 'IDR': 'Rp',
-      'MYR': 'RM', 'VND': '₫', 'NZD': 'NZ\$', 'BRL': 'R\$', 'MXN': '\$',
-      'RUB': '₽', 'ZAR': 'R', 'AED': 'د.إ', 'SAR': '﷼', 'TRY': '₺',
-    };
-
     setState(() {
       _currencyCode = currencyCode;
-      _currencySymbol = currencies[currencyCode] ?? '₱';
+      _currencySymbol = currencies[currencyCode]?.symbol ?? '₱';
     });
   }
 
@@ -131,12 +203,17 @@ class _ExpenseHomeState extends State<ExpenseHome> {
         ExpenseRepository.getBalance(),
       ]);
 
+      _cachedSortedEntries = null;
       setState(() {
         _entries = results[0] as List<Entry>;
         _tags = results[1] as List<Tag>;
         _balance = results[2] as double;
         _isLoading = false;
       });
+
+      // Trigger staggered entrance animations
+      _listAnimController.forward(from: 0);
+      _balanceController.forward(from: 0);
     } catch (e) {
       setState(() {
         _errorMessage = 'Failed to load data: $e';
@@ -186,27 +263,7 @@ class _ExpenseHomeState extends State<ExpenseHome> {
   }
 
   Future<void> _deleteEntry(Entry entry) async {
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Delete Entry'),
-        content: Text('Delete ${_formatMoney(entry.amount)}?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            style: TextButton.styleFrom(foregroundColor: Colors.red),
-            child: const Text('Delete'),
-          ),
-        ],
-      ),
-    );
-
-    if (confirm != true || entry.id == null) return;
-
+    if (entry.id == null) return;
     try {
       await ExpenseRepository.deleteEntry(entry.id!);
       await _loadData();
@@ -223,13 +280,15 @@ class _ExpenseHomeState extends State<ExpenseHome> {
     showDialog(
       context: context,
       builder: (context) => CalculatorDialog(
+        currencyCode: _currencyCode,
         onUseResult: (result) {
+          final text = _formatMoney(result);
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text('Calculated: ${_formatMoney(result)}'),
+              content: Text('Calculated: $text'),
               action: SnackBarAction(
                 label: 'Copy',
-                onPressed: () {},
+                onPressed: () => Clipboard.setData(ClipboardData(text: text)),
               ),
             ),
           );
@@ -238,33 +297,23 @@ class _ExpenseHomeState extends State<ExpenseHome> {
     );
   }
 
-  void _openSettings() async {
-    final result = await Navigator.push(
-      context,
-      MaterialPageRoute(builder: (_) => const SettingsPage()),
-    );
-
-    // Refresh data and settings if import was successful or currency changed
-    if (result == true) {
-      _loadSettings();
-      _loadData();
-    }
-  }
-
   Tag? _getTagForEntry(Entry entry) {
-    try {
-      return _tags.firstWhere((t) => t.id == entry.tagId);
-    } catch (e) {
-      return null;
+    for (final tag in _tags) {
+      if (tag.id == entry.tagId) return tag;
     }
+    return null;
   }
 
   List<Entry> _sortedEntries() {
-    final sortedEntries = List<Entry>.from(_entries);
+    if (_cachedSortedEntries != null) {
+      return _cachedSortedEntries!;
+    }
     if (!_sortByGroup) {
-      return sortedEntries;
+      _cachedSortedEntries = List.unmodifiable(_entries);
+      return _cachedSortedEntries!;
     }
 
+    final sortedEntries = List<Entry>.from(_entries);
     sortedEntries.sort((left, right) {
       final leftTag = _getTagForEntry(left);
       final rightTag = _getTagForEntry(right);
@@ -286,7 +335,8 @@ class _ExpenseHomeState extends State<ExpenseHome> {
       return right.date.compareTo(left.date);
     });
 
-    return sortedEntries;
+    _cachedSortedEntries = List.unmodifiable(sortedEntries);
+    return _cachedSortedEntries!;
   }
 
   String _formatMoney(double amount, {bool absolute = false}) {
@@ -309,63 +359,65 @@ class _ExpenseHomeState extends State<ExpenseHome> {
             tooltip: 'Calculator',
             onPressed: _openCalculator,
           ),
-          IconButton(
-            icon: const Icon(Icons.bar_chart),
-            tooltip: 'Statistics',
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => StatisticsPage(currencySymbol: _currencySymbol),
-                ),
-              );
-            },
-          ),
-          IconButton(
-            icon: const Icon(Icons.category),
-            tooltip: 'Manage Tags',
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const TagManagerPage()),
-              ).then((_) => _loadData());
-            },
-          ),
-          IconButton(
-            icon: const Icon(Icons.settings),
-            tooltip: 'Settings',
-            onPressed: _openSettings,
-          ),
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            tooltip: 'Refresh',
-            onPressed: _loadData,
-          ),
+          if (widget.onOpenSettings != null)
+            IconButton(
+              icon: const Icon(Icons.settings_rounded),
+              tooltip: 'Settings',
+              onPressed: widget.onOpenSettings,
+            ),
         ],
       ),
       body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
+          ? _buildShimmerLoading(colorScheme)
           : _errorMessage != null
           ? _buildErrorView()
           : _buildContent(colorScheme),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: _tags.isEmpty
-            ? () {
-          Navigator.push(
-            context,
-            MaterialPageRoute(builder: (_) => const TagManagerPage()),
-          ).then((_) => _loadData());
-        }
-            : () => showDialog(
-          context: context,
-          builder: (_) => AddEntryDialog(
-            onSaveEntry: _addEntry,
-            tags: _tags,
-            currencySymbol: _currencySymbol,
+    );
+  }
+
+  Widget _buildShimmerLoading(ColorScheme colorScheme) {
+    return Padding(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        children: [
+          // Shimmer balance card
+          _ShimmerBox(
+            width: double.infinity,
+            height: 140,
+            borderRadius: BorderRadius.circular(12),
           ),
-        ),
-        icon: const Icon(Icons.add),
-        label: Text(_tags.isEmpty ? 'Create Tag' : 'Add Entry'),
+          const SizedBox(height: 16),
+          // Shimmer summary chips
+          Row(
+            children: [
+              Expanded(
+                child: _ShimmerBox(
+                  width: double.infinity,
+                  height: 60,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _ShimmerBox(
+                  width: double.infinity,
+                  height: 60,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 24),
+          // Shimmer list items
+          ...List.generate(5, (i) => Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: _ShimmerBox(
+              width: double.infinity,
+              height: 72,
+              borderRadius: BorderRadius.circular(12),
+            ),
+          )),
+        ],
       ),
     );
   }
@@ -398,34 +450,47 @@ class _ExpenseHomeState extends State<ExpenseHome> {
     return Column(
       children: [
         // Balance Card
-        Card(
-          margin: const EdgeInsets.all(16),
-          child: Padding(
-            padding: const EdgeInsets.all(20),
-            child: Column(
-              children: [
-                Text(
-                  'Current Balance ($_currencyCode)',
-                  style: const TextStyle(fontSize: 14, color: Colors.grey),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  _formatMoney(_balance),
-                  style: TextStyle(
-                    fontSize: 36,
-                    fontWeight: FontWeight.bold,
-                    color: _balance >= 0 ? Colors.green : Colors.red,
-                  ),
-                ),
-                if (_balance != 0)
+        AnimatedBuilder(
+          animation: _balanceController,
+          builder: (context, child) {
+            return Transform.scale(
+              scale: _balanceScale.value,
+              alignment: Alignment.topCenter,
+              child: Opacity(
+                opacity: _balanceFade.value,
+                child: child,
+              ),
+            );
+          },
+          child: Card(
+            margin: const EdgeInsets.all(16),
+            child: Padding(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                children: [
                   Text(
-                    _balance > 0 ? 'Positive Balance' : 'Negative Balance',
+                    'Current Balance ($_currencyCode)',
+                    style: const TextStyle(fontSize: 14, color: Colors.grey),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    _formatMoney(_balance),
                     style: TextStyle(
-                      color: _balance > 0 ? Colors.green : Colors.red,
-                      fontSize: 12,
+                      fontSize: 36,
+                      fontWeight: FontWeight.bold,
+                      color: _balance >= 0 ? Colors.green : Colors.red,
                     ),
                   ),
-              ],
+                  if (_balance != 0)
+                    Text(
+                      _balance > 0 ? 'Positive Balance' : 'Negative Balance',
+                      style: TextStyle(
+                        color: _balance > 0 ? Colors.green : Colors.red,
+                        fontSize: 12,
+                      ),
+                    ),
+                ],
+              ),
             ),
           ),
         ),
@@ -484,6 +549,7 @@ class _ExpenseHomeState extends State<ExpenseHome> {
                 onPressed: () {
                   setState(() {
                     _sortByGroup = !_sortByGroup;
+                    _cachedSortedEntries = null;
                   });
                 },
               ),
@@ -513,13 +579,32 @@ class _ExpenseHomeState extends State<ExpenseHome> {
               ],
             ),
           )
-              : ListView.builder(
-            itemCount: sortedEntries.length,
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            itemBuilder: (context, index) {
-              final entry = sortedEntries[index];
-              final tag = _getTagForEntry(entry);
-              return _buildEntryTile(entry, tag);
+              : AnimatedBuilder(
+            animation: _listAnimController,
+            builder: (context, child) {
+              return ListView.builder(
+                itemCount: sortedEntries.length,
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                itemBuilder: (context, index) {
+                  final entry = sortedEntries[index];
+                  final tag = _getTagForEntry(entry);
+                  // Staggered animation: each item delays based on index
+                  final itemDelay = (index / (sortedEntries.length.clamp(1, 15))).clamp(0.0, 1.0);
+                  final itemAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
+                    CurvedAnimation(
+                      parent: _listAnimController,
+                      curve: Interval(itemDelay, (itemDelay + 0.4).clamp(0.0, 1.0), curve: Curves.easeOutCubic),
+                    ),
+                  );
+                  return Transform.translate(
+                    offset: Offset(0, 20 * (1 - itemAnimation.value)),
+                    child: Opacity(
+                      opacity: itemAnimation.value,
+                      child: _buildEntryTile(entry, tag),
+                    ),
+                  );
+                },
+              );
             },
           ),
         ),
@@ -579,8 +664,27 @@ class _ExpenseHomeState extends State<ExpenseHome> {
         child: const Icon(Icons.delete, color: Colors.white),
       ),
       confirmDismiss: (_) async {
+        final confirm = await showDialog<bool>(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text('Delete Entry'),
+            content: Text('Delete ${_formatMoney(entry.amount)}?'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(false),
+                child: const Text('Cancel'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(true),
+                style: TextButton.styleFrom(foregroundColor: Colors.red),
+                child: const Text('Delete'),
+              ),
+            ],
+          ),
+        );
+        if (confirm != true) return false;
         await _deleteEntry(entry);
-        return false;
+        return true;
       },
       child: Card(
         margin: const EdgeInsets.only(bottom: 8),
@@ -591,6 +695,7 @@ class _ExpenseHomeState extends State<ExpenseHome> {
               onSaveEntry: _updateEntry,
               tags: _tags,
               currencySymbol: _currencySymbol,
+              currencyCode: _currencyCode,
               initialEntry: entry,
             ),
           ),
@@ -626,9 +731,9 @@ class _ExpenseHomeState extends State<ExpenseHome> {
                           vertical: 3,
                         ),
                         decoration: BoxDecoration(
-                          color: color.withValues(alpha: 0.1),
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: color.withValues(alpha: 0.25)),
+                           color: color.withValues(alpha: 0.1),
+                           borderRadius: BorderRadius.circular(8),
+                           border: Border.all(color: color.withValues(alpha: 0.25)),
                         ),
                         child: Text(
                           tag.groupName!,
@@ -680,13 +785,34 @@ class _ExpenseHomeState extends State<ExpenseHome> {
                     onSaveEntry: _updateEntry,
                     tags: _tags,
                     currencySymbol: _currencySymbol,
+                    currencyCode: _currencyCode,
                     initialEntry: entry,
                   ),
                 ),
               ),
               IconButton(
                 icon: const Icon(Icons.delete_outline, color: Colors.grey),
-                onPressed: () => _deleteEntry(entry),
+                onPressed: () async {
+                  final confirm = await showDialog<bool>(
+                    context: context,
+                    builder: (context) => AlertDialog(
+                      title: const Text('Delete Entry'),
+                      content: Text('Delete ${_formatMoney(entry.amount)}?'),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.of(context).pop(false),
+                          child: const Text('Cancel'),
+                        ),
+                        TextButton(
+                          onPressed: () => Navigator.of(context).pop(true),
+                          style: TextButton.styleFrom(foregroundColor: Colors.red),
+                          child: const Text('Delete'),
+                        ),
+                      ],
+                    ),
+                  );
+                  if (confirm == true) _deleteEntry(entry);
+                },
               ),
             ],
           ),
@@ -707,5 +833,74 @@ class _ExpenseHomeState extends State<ExpenseHome> {
     } else {
       return '${date.day}/${date.month}/${date.year}';
     }
+  }
+}
+
+/// Animated shimmer placeholder used while data is loading.
+class _ShimmerBox extends StatefulWidget {
+  final double width;
+  final double height;
+  final BorderRadius borderRadius;
+
+  const _ShimmerBox({
+    required this.width,
+    required this.height,
+    required this.borderRadius,
+  });
+
+  @override
+  State<_ShimmerBox> createState() => _ShimmerBoxState();
+}
+
+class _ShimmerBoxState extends State<_ShimmerBox>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+  late Animation<double> _animation;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      duration: const Duration(milliseconds: 1500),
+      vsync: this,
+    )..repeat();
+    _animation = Tween<double>(begin: -1.0, end: 2.0).animate(
+      CurvedAnimation(parent: _controller, curve: Curves.easeInOutSine),
+    );
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final base = Theme.of(context).colorScheme.surfaceContainerHighest;
+    final highlight = Theme.of(context).colorScheme.surface;
+
+    return AnimatedBuilder(
+      animation: _animation,
+      builder: (context, child) {
+        return Container(
+          width: widget.width,
+          height: widget.height,
+          decoration: BoxDecoration(
+            borderRadius: widget.borderRadius,
+            gradient: LinearGradient(
+              begin: Alignment.centerLeft,
+              end: Alignment.centerRight,
+              colors: [base, highlight, base],
+              stops: [
+                (_animation.value - 0.3).clamp(0.0, 1.0),
+                _animation.value.clamp(0.0, 1.0),
+                (_animation.value + 0.3).clamp(0.0, 1.0),
+              ],
+            ),
+          ),
+        );
+      },
+    );
   }
 }

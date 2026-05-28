@@ -90,24 +90,11 @@ class ExpenseRepository {
   }
 
   static Future<void> replaceGroupMembership(int groupId, List<int> tagIds) async {
-    final db = await DBHelper.database;
-    await db.transaction((txn) async {
-      await txn.update(
-        'tags',
-        {'group_id': null},
-        where: 'group_id = ?',
-        whereArgs: [groupId],
-      );
+    await DBHelper.rawQuery('UPDATE tags SET group_id = NULL WHERE group_id = ?', [groupId]);
 
-      for (final tagId in tagIds) {
-        await txn.update(
-          'tags',
-          {'group_id': groupId},
-          where: 'id = ?',
-          whereArgs: [tagId],
-        );
-      }
-    });
+    for (final tagId in tagIds) {
+      await DBHelper.update('tags', {'group_id': groupId}, 'id = ?', [tagId]);
+    }
   }
 
   static Future<List<Entry>> getAllEntries({String? orderBy}) async {

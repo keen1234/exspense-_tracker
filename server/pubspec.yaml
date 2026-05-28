@@ -1,0 +1,12 @@
+name: receipt_scanner_api
+description: Receipt Scanner API server
+version: 1.0.0
+
+environment:
+  sdk: ^3.11.1
+
+dependencies:
+  shelf: ^1.4.2
+  google_mlkit_text_recognition: ^0.14.0
+  path: ^1.9.1
+  intl: ^0.20.2

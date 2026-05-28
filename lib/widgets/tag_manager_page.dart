@@ -1,11 +1,16 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../models/tag.dart';
 import '../models/tag_group.dart';
 import '../repositories/expense_repository.dart';
+import 'calculator_dialog.dart' show CalculatorDialog;
 
 class TagManagerPage extends StatefulWidget {
-  const TagManagerPage({super.key});
+  final String currencyCode;
+  final VoidCallback? onOpenSettings;
+
+  const TagManagerPage({super.key, this.currencyCode = 'PHP', this.onOpenSettings});
 
   @override
   State<TagManagerPage> createState() => _TagManagerPageState();
@@ -67,11 +72,11 @@ class _TagManagerPageState extends State<TagManagerPage> {
 
     final name = _tagNameController.text.trim();
     final duplicateExists = _tags.any(
-      (tag) => tag.name.toLowerCase() == name.toLowerCase(),
+      (tag) => tag.name.toLowerCase() == name.toLowerCase() && tag.type == _selectedType,
     );
     if (duplicateExists) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Tag with this name already exists')),
+        const SnackBar(content: Text('Tag with this name and type already exists')),
       );
       return;
     }
@@ -167,10 +172,11 @@ class _TagManagerPageState extends State<TagManagerPage> {
                     final duplicateExists = _tags.any(
                       (existingTag) =>
                           existingTag.id != tag.id &&
-                          existingTag.name.toLowerCase() == trimmed.toLowerCase(),
+                          existingTag.name.toLowerCase() == trimmed.toLowerCase() &&
+                          existingTag.type == selectedType,
                     );
                     if (duplicateExists) {
-                      return 'Tag with this name already exists';
+                      return 'Tag with this name and type already exists';
                     }
                     return null;
                   },
@@ -489,11 +495,37 @@ class _TagManagerPageState extends State<TagManagerPage> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Manage Tags'),
+        centerTitle: true,
         actions: [
           IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: _loadData,
+            icon: const Icon(Icons.calculate),
+            tooltip: 'Calculator',
+            onPressed: () => showDialog(
+              context: context,
+              builder: (context) => CalculatorDialog(
+                currencyCode: widget.currencyCode,
+                onUseResult: (result) {
+                  if (!mounted) return;
+                  final text = result.toStringAsFixed(2);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Calculated: $text'),
+                      action: SnackBarAction(
+                        label: 'Copy',
+                        onPressed: () => Clipboard.setData(ClipboardData(text: text)),
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
           ),
+          if (widget.onOpenSettings != null)
+            IconButton(
+              icon: const Icon(Icons.settings_rounded),
+              tooltip: 'Settings',
+              onPressed: widget.onOpenSettings,
+            ),
         ],
       ),
       body: _isLoading
@@ -740,10 +772,10 @@ class _TagManagerPageState extends State<TagManagerPage> {
                             )
                           : Column(
                               children: _ungroupedTags.map((tag) {
-                                return ListTile(
-                                  leading: CircleAvatar(
-                                    backgroundColor: tag.type.color.withValues(alpha: 0.1),
-                                    child: Icon(tag.type.icon, color: tag.type.color, size: 20),
+                                  return ListTile(
+                                   leading: CircleAvatar(
+                                     backgroundColor: tag.type.color.withValues(alpha: 0.1),
+                                     child: Icon(tag.type.icon, color: tag.type.color, size: 20),
                                   ),
                                   title: Text(tag.name),
                                   subtitle: Text(tag.type.name.toUpperCase()),

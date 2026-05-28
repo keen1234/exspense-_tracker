@@ -1,57 +1,45 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'dart:convert';
-import 'dart:typed_data';
 import 'dart:io';
 import '../database/db_helper.dart';
-import '../models/account_session.dart';
+import '../models/currencies.dart';
 import '../repositories/expense_repository.dart';
 import '../services/settings_service.dart';
 import '../services/update_service.dart';
+import 'calculator_dialog.dart' show CalculatorDialog;
 
 class SettingsPage extends StatefulWidget {
-  const SettingsPage({super.key});
+  final VoidCallback? onChanged;
+  final VoidCallback? onOpenSettings;
+
+  const SettingsPage({super.key, this.onChanged, this.onOpenSettings});
 
   @override
   State<SettingsPage> createState() => _SettingsPageState();
 }
 
 class _SettingsPageState extends State<SettingsPage> {
-  String _selectedCurrencyCode = 'PHP'; // Store code instead of symbol
-  List<AccountSession> _accounts = const [];
-  String _activeAccountId = '';
+  String _selectedCurrencyCode = 'PHP';
+  ThemeMode _themeMode = ThemeMode.system;
   bool _isLoading = false;
   String _appVersionLabel = 'Version -';
 
-  final Map<String, Map<String, dynamic>> _currencies = {
-    'PHP': {'symbol': '₱', 'name': 'Philippine Peso', 'flag': '🇵🇭'},
-    'USD': {'symbol': '\$', 'name': 'US Dollar', 'flag': '🇺🇸'},
-    'EUR': {'symbol': '€', 'name': 'Euro', 'flag': '🇪🇺'},
-    'GBP': {'symbol': '£', 'name': 'British Pound', 'flag': '🇬🇧'},
-    'JPY': {'symbol': '¥', 'name': 'Japanese Yen', 'flag': '🇯🇵'},
-    'KRW': {'symbol': '₩', 'name': 'South Korean Won', 'flag': '🇰🇷'},
-    'CNY': {'symbol': '¥', 'name': 'Chinese Yuan', 'flag': '🇨🇳'},
-    'INR': {'symbol': '₹', 'name': 'Indian Rupee', 'flag': '🇮🇳'},
-    'AUD': {'symbol': 'A\$', 'name': 'Australian Dollar', 'flag': '🇦🇺'},
-    'CAD': {'symbol': 'C\$', 'name': 'Canadian Dollar', 'flag': '🇨🇦'},
-    'CHF': {'symbol': 'Fr', 'name': 'Swiss Franc', 'flag': '🇨🇭'},
-    'SGD': {'symbol': 'S\$', 'name': 'Singapore Dollar', 'flag': '🇸🇬'},
-    'HKD': {'symbol': 'HK\$', 'name': 'Hong Kong Dollar', 'flag': '🇭🇰'},
-    'THB': {'symbol': '฿', 'name': 'Thai Baht', 'flag': '🇹🇭'},
-    'IDR': {'symbol': 'Rp', 'name': 'Indonesian Rupiah', 'flag': '🇮🇩'},
-    'MYR': {'symbol': 'RM', 'name': 'Malaysian Ringgit', 'flag': '🇲🇾'},
-    'VND': {'symbol': '₫', 'name': 'Vietnamese Dong', 'flag': '🇻🇳'},
-    'NZD': {'symbol': 'NZ\$', 'name': 'New Zealand Dollar', 'flag': '🇳🇿'},
-    'BRL': {'symbol': 'R\$', 'name': 'Brazilian Real', 'flag': '🇧🇷'},
-    'MXN': {'symbol': '\$', 'name': 'Mexican Peso', 'flag': '🇲🇽'},
-    'RUB': {'symbol': '₽', 'name': 'Russian Ruble', 'flag': '🇷🇺'},
-    'ZAR': {'symbol': 'R', 'name': 'South African Rand', 'flag': '🇿🇦'},
-    'AED': {'symbol': 'د.إ', 'name': 'UAE Dirham', 'flag': '🇦🇪'},
-    'SAR': {'symbol': '﷼', 'name': 'Saudi Riyal', 'flag': '🇸🇦'},
-    'TRY': {'symbol': '₺', 'name': 'Turkish Lira', 'flag': '🇹🇷'},
-  };
+  String get _themeName {
+    final name = _themeMode.toString().split('.').last;
+    return name[0].toUpperCase() + name.substring(1);
+  }
+
+  void _notifyChanged() {
+    if (widget.onChanged != null) {
+      widget.onChanged!();
+    } else {
+      Navigator.of(context).pop(true);
+    }
+  }
 
   @override
   void initState() {
@@ -63,172 +51,9 @@ class _SettingsPageState extends State<SettingsPage> {
   void _loadSettings() {
     final settings = SettingsService();
     setState(() {
-      _accounts = settings.getAccounts();
-      _activeAccountId = settings.getCurrentAccount().id;
       _selectedCurrencyCode = settings.getCurrency();
+      _themeMode = settings.getThemeMode();
     });
-  }
-
-  Future<void> _addAccount() async {
-    final controller = TextEditingController();
-    final accountName = await showDialog<String>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Add Account'),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          textCapitalization: TextCapitalization.words,
-          decoration: const InputDecoration(
-            labelText: 'Account name',
-            hintText: 'Personal, Work, Business',
-          ),
-          onSubmitted: (value) => Navigator.of(context).pop(value),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.of(context).pop(controller.text),
-            child: const Text('Create'),
-          ),
-        ],
-      ),
-    );
-    controller.dispose();
-
-    final trimmedName = accountName?.trim();
-    if (trimmedName == null || trimmedName.isEmpty) {
-      return;
-    }
-
-    setState(() => _isLoading = true);
-
-    try {
-      final settings = SettingsService();
-      final account = await settings.addAccount(
-        trimmedName,
-        initialCurrencyCode: _selectedCurrencyCode,
-      );
-      await DBHelper.close();
-
-      if (!mounted) {
-        return;
-      }
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Switched to ${account.name}')),
-      );
-      Navigator.of(context).pop(true);
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Unable to add account: $e')),
-        );
-      }
-    } finally {
-      if (mounted) {
-        setState(() => _isLoading = false);
-      }
-    }
-  }
-
-  Future<void> _renameAccount(AccountSession account) async {
-    final controller = TextEditingController(text: account.name);
-    final accountName = await showDialog<String>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Edit Account Name'),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          textCapitalization: TextCapitalization.words,
-          decoration: const InputDecoration(
-            labelText: 'Account name',
-          ),
-          onSubmitted: (value) => Navigator.of(context).pop(value),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.of(context).pop(controller.text),
-            child: const Text('Save'),
-          ),
-        ],
-      ),
-    );
-    controller.dispose();
-
-    final trimmedName = accountName?.trim();
-    if (trimmedName == null || trimmedName.isEmpty || trimmedName == account.name) {
-      return;
-    }
-
-    setState(() => _isLoading = true);
-
-    try {
-      final updated = await SettingsService().renameAccount(account.id, trimmedName);
-      if (!mounted) {
-        return;
-      }
-
-      _loadSettings();
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Renamed account to ${updated.name}')),
-      );
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Unable to rename account: $e')),
-        );
-      }
-    } finally {
-      if (mounted) {
-        setState(() => _isLoading = false);
-      }
-    }
-  }
-
-  Future<void> _switchAccount(String accountId) async {
-    if (accountId == _activeAccountId) {
-      return;
-    }
-
-    setState(() => _isLoading = true);
-
-    try {
-      final settings = SettingsService();
-      final selectedAccount = _accounts.firstWhere(
-        (account) => account.id == accountId,
-      );
-
-      await settings.switchAccount(accountId);
-      await DBHelper.close();
-
-      if (!mounted) {
-        return;
-      }
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Switched to ${selectedAccount.name}')),
-      );
-      Navigator.of(context).pop(true);
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Unable to switch account: $e')),
-        );
-      }
-    } finally {
-      if (mounted) {
-        setState(() => _isLoading = false);
-      }
-    }
   }
 
   Future<void> _loadAppVersion() async {
@@ -277,7 +102,7 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   Future<bool> _saveBackupFile(String fileName, Uint8List bytes) async {
-    final savePath = await FilePicker.platform.saveFile(
+    final savePath = await FilePicker.saveFile(
       dialogTitle: 'Save Expense Backup',
       fileName: fileName,
       type: FileType.custom,
@@ -327,11 +152,10 @@ class _SettingsPageState extends State<SettingsPage> {
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Currency changed to ${_currencies[currencyCode]!['name']}'),
+          content: Text('Currency changed to ${currencies[currencyCode]?.name ?? currencyCode}'),
         ),
       );
-      // Return true to notify parent to refresh
-      Navigator.of(context).pop(true);
+      _notifyChanged();
     }
   }
 
@@ -449,10 +273,9 @@ class _SettingsPageState extends State<SettingsPage> {
     setState(() => _isLoading = true);
 
     try {
-      final result = await FilePicker.platform.pickFiles(
+      final result = await FilePicker.pickFiles(
         type: FileType.custom,
         allowedExtensions: ['json'],
-        allowMultiple: false,
       );
 
       if (result == null || result.files.isEmpty) {
@@ -688,7 +511,7 @@ class _SettingsPageState extends State<SettingsPage> {
       return (importedGroupCount, importedTagCount, importedEntryCount);
     });
 
-    if (importedCurrency != null && _currencies.containsKey(importedCurrency)) {
+    if (importedCurrency != null && currencies.containsKey(importedCurrency)) {
       await SettingsService().setCurrency(importedCurrency);
       if (mounted) {
         setState(() => _selectedCurrencyCode = importedCurrency);
@@ -706,7 +529,7 @@ class _SettingsPageState extends State<SettingsPage> {
           ),
         ),
       );
-      Navigator.of(context).pop(true);
+      _notifyChanged();
     }
   }
 
@@ -741,12 +564,13 @@ class _SettingsPageState extends State<SettingsPage> {
       final db = await DBHelper.database;
       await db.delete('entries');
       await db.delete('tags');
+      await db.delete('tag_groups');
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('All data cleared')),
         );
-        Navigator.of(context).pop(true);
+        _notifyChanged();
       }
     } catch (e) {
       if (mounted) {
@@ -796,86 +620,66 @@ class _SettingsPageState extends State<SettingsPage> {
 
   @override
   Widget build(BuildContext context) {
-    final selectedCurrency = _currencies[_selectedCurrencyCode]!;
+    final selectedCurrency = currencies[_selectedCurrencyCode] ?? currencies['PHP']!;
     final updateService = UpdateService();
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('Settings'),
+        centerTitle: true,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.calculate),
+            tooltip: 'Calculator',
+            onPressed: () => showDialog(
+              context: context,
+              builder: (context) => CalculatorDialog(
+                currencyCode: _selectedCurrencyCode,
+                onUseResult: (result) {
+                  if (!mounted) return;
+                  final text = result.toStringAsFixed(2);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Calculated: $text'),
+                      action: SnackBarAction(
+                        label: 'Copy',
+                        onPressed: () => Clipboard.setData(ClipboardData(text: text)),
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ),
+          if (widget.onOpenSettings != null)
+            IconButton(
+              icon: const Icon(Icons.settings_rounded),
+              tooltip: 'Settings',
+              onPressed: widget.onOpenSettings,
+            ),
+        ],
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : ListView(
         children: [
-          _buildSectionHeader('Account'),
-          Card(
-            margin: const EdgeInsets.symmetric(horizontal: 12),
-            child: Column(
-              children: [
-                for (final account in _accounts)
-                  ListTile(
-                    leading: CircleAvatar(
-                      child: Text(
-                        account.name.substring(0, 1).toUpperCase(),
-                      ),
-                    ),
-                    title: Text(account.name),
-                    subtitle: Text(
-                      account.id == _activeAccountId
-                          ? 'Current session'
-                          : 'Tap to switch session',
-                    ),
-                    trailing: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          account.id == _activeAccountId
-                              ? Icons.check_circle
-                              : Icons.radio_button_unchecked,
-                          color: account.id == _activeAccountId
-                              ? Theme.of(context).colorScheme.primary
-                              : Theme.of(context).disabledColor,
-                        ),
-                        IconButton(
-                          tooltip: 'Edit account name',
-                          icon: const Icon(Icons.edit_outlined),
-                          color: Theme.of(context).colorScheme.primary,
-                          onPressed: () => _renameAccount(account),
-                        ),
-                      ],
-                    ),
-                    onTap: () => _switchAccount(account.id),
-                  ),
-                const Divider(height: 1),
-                ListTile(
-                  leading: const Icon(Icons.person_add_alt_1),
-                  title: const Text('Add Account'),
-                  subtitle: const Text('Create another separate session'),
-                  onTap: _addAccount,
-                ),
-              ],
-            ),
-          ),
-
-          const Divider(),
-
           _buildSectionHeader('Currency'),
           ListTile(
             leading: const Icon(Icons.attach_money),
             title: const Text('Currency'),
-            subtitle: Text('${selectedCurrency['flag']} ${selectedCurrency['name']} (${selectedCurrency['symbol']})'),
+            subtitle: Text('${selectedCurrency.flag} ${selectedCurrency.name} (${selectedCurrency.symbol})'),
             trailing: DropdownButton<String>(
               value: _selectedCurrencyCode,
               underline: const SizedBox(),
-              items: _currencies.entries.map((entry) {
+              items: currencies.entries.map((entry) {
                 return DropdownMenuItem<String>(
                   value: entry.key,
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Text(entry.value['flag'] as String),
+                      Text(entry.value.flag),
                       const SizedBox(width: 8),
-                      Text('${entry.value['symbol']} ${entry.key}'),
+                      Text('${entry.value.symbol} ${entry.key}'),
                     ],
                   ),
                 );
@@ -885,6 +689,40 @@ class _SettingsPageState extends State<SettingsPage> {
               },
             ),
           ),
+
+           const Divider(),
+
+           _buildSectionHeader('Theme'),
+
+           ListTile(
+             leading: const Icon(Icons.dark_mode),
+             title: Text(_themeName),
+             trailing: SegmentedButton<ThemeMode>(
+               segments: const [
+                 ButtonSegment(
+                   value: ThemeMode.system,
+                   icon: Icon(Icons.brightness_auto),
+                   label: Text('System'),
+                 ),
+                 ButtonSegment(
+                   value: ThemeMode.light,
+                   icon: Icon(Icons.light_mode),
+                   label: Text('Light'),
+                 ),
+                 ButtonSegment(
+                   value: ThemeMode.dark,
+                   icon: Icon(Icons.dark_mode),
+                   label: Text('Dark'),
+                 ),
+               ],
+               selected: {_themeMode},
+               onSelectionChanged: (value) {
+                 final mode = value.first;
+                 SettingsService().setThemeMode(mode);
+                 setState(() => _themeMode = mode);
+               },
+             ),
+           ),
 
           const Divider(),
 

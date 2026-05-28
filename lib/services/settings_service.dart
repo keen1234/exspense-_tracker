@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/account_session.dart';
@@ -9,8 +10,12 @@ class SettingsService {
   static const String _firstRunKey = 'first_run';
   static const String _accountsKey = 'accounts';
   static const String _activeAccountIdKey = 'active_account_id';
+  static const String _themeModeKey = 'theme_mode';
   static const String _defaultAccountId = 'default';
   static const String _defaultDatabaseName = 'expenses.db';
+
+  static final ValueNotifier<ThemeMode> themeModeNotifier =
+      ValueNotifier(ThemeMode.system);
 
   static final SettingsService _instance = SettingsService._internal();
   factory SettingsService() => _instance;
@@ -21,6 +26,7 @@ class SettingsService {
   Future<void> init() async {
     _prefs = await SharedPreferences.getInstance();
     await _ensureAccountsInitialized();
+    themeModeNotifier.value = getThemeMode();
   }
 
   // Currency
@@ -150,6 +156,20 @@ class SettingsService {
     accounts[accountIndex] = updated;
     await _writeAccounts(accounts);
     return updated;
+  }
+
+  // Theme mode
+  ThemeMode getThemeMode() {
+    final value = _prefs?.getString(_themeModeKey) ?? 'system';
+    return ThemeMode.values.firstWhere(
+      (e) => e.name == value,
+      orElse: () => ThemeMode.system,
+    );
+  }
+
+  Future<void> setThemeMode(ThemeMode mode) async {
+    await _prefs?.setString(_themeModeKey, mode.name);
+    themeModeNotifier.value = mode;
   }
 
   // Check if first run (for database initialization)

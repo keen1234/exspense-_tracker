@@ -16,6 +16,10 @@ class DBHelper {
   static String? _initializationPath;
   static const int _databaseVersion = 4;
 
+  /// Called when a corrupted database is detected and deleted.
+  /// Set this from the UI layer to show a warning to the user.
+  static void Function(String reason)? onDatabaseReset;
+
   static Future<Database> get database async {
     final path = await _getDatabasePath();
 
@@ -70,7 +74,6 @@ class DBHelper {
     return join(dbPath, databaseName);
   }
 
-  /// Validates existing database schema before opening it normally.
   static Future<void> _validateOrRecreateDatabase(String path) async {
     final exists = await databaseExists(path);
     if (!exists) {
@@ -96,10 +99,16 @@ class DBHelper {
 
       if (tableNames.isNotEmpty &&
           (!tableNames.contains('tags') || !tableNames.contains('entries'))) {
-        throw DatabaseException(
-          'Existing database schema is missing required tables.',
-        );
+        await testDb.close();
+        await deleteDatabase(path);
+        onDatabaseReset?.call('Database had missing tables and was recreated.');
       }
+    } catch (_) {
+      if (testDb != null && testDb.isOpen) {
+        await testDb.close();
+      }
+      await deleteDatabase(path);
+      onDatabaseReset?.call('Database was corrupted and had to be recreated. Previous data was lost.');
     } finally {
       if (testDb != null && testDb.isOpen) {
         await testDb.close();
